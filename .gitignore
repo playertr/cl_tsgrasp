@@ -1,0 +1,8 @@
+*.pdf
+*.vscode
+*/build/*
+*/devel/*
+*/install/*
+*/log/*
+.catkin_workspace
+frames.gv
