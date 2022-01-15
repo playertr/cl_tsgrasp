@@ -11,7 +11,7 @@ from nn.load_model import load_model
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import Header
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2, PointField, Image
 from rospy.numpy_msg import numpy_msg
 from cl_tsgrasp.msg import Grasps
 import sensor_msgs.point_cloud2 as pcl2
@@ -31,11 +31,11 @@ import MinkowskiEngine as ME
 
 ## global constants
 QUEUE_LEN       = 8
-PTS_PER_FRAME   = 45000
+PTS_PER_FRAME   = 100
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0.5
 TOP_K           = 1
-BOUNDS          = [[-0.1, 0.1, 0.49], [0.1, 0.3, 0.55]] # (xyz_lower, xyz_upper)
+BOUNDS          = [[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]] # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0.1034
@@ -237,6 +237,64 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
         class_logits[idcs], baseline_dir[idcs], approach_dir[idcs], grasp_offset[idcs]
     )
 
+# @torch.inference_mode()
+# def depth_to_pointcloud(depth, fov=np.pi/6):
+#     """Convert depth image to pointcloud given camera intrinsics, from acronym.scripts.acronym_render_observations
+
+#     Args:
+#         depth (np.torch.Tensor): Depth image.
+
+#     Returns:
+#         torch.Tensor: Point cloud.
+#     """
+#     fy = fx = 0.5 / np.tan(fov * 0.5)  # aspectRatio is one.
+
+#     height = depth.shape[0]
+#     width = depth.shape[1]
+
+#     mask = torch.where(depth > 0)
+
+#     x = mask[1]
+#     y = mask[0]
+#     normalized_x = (x - width * 0.5) / width
+#     normalized_y = (y - height * 0.5) / height
+
+#     world_x = normalized_x.reshape(-1, 1) * depth[y, x] / fx
+#     world_y = normalized_y.reshape(-1, 1) * depth[y, x] / fy
+#     world_z = depth[y, x]
+
+#     return torch.cat([world_x, world_y, world_z], dim=1)
+
+def depth_to_pointcloud(depth, fov=np.pi/6):
+    """Convert depth image to pointcloud given camera intrinsics, from acronym.scripts.acronym_render_observations
+
+    Args:
+        depth (np.ndarray): Depth image.
+
+    Returns:
+        np.ndarray: Point cloud.
+    """
+    fy = fx = 0.5 / np.tan(fov * 0.5)  # aspectRatio is one.
+
+    height = depth.shape[0]
+    width = depth.shape[1]
+
+    mask = np.where(depth > 0)
+
+    x = mask[1]
+    y = mask[0]
+
+    normalized_x = (x.astype(np.float32) - width * 0.5) / width
+    normalized_y = (y.astype(np.float32) - height * 0.5) / height
+
+    world_x = normalized_x * depth[y, x] / fx
+    world_y = normalized_y * depth[y, x] / fy
+    world_z = depth[y, x]
+
+    return np.vstack((world_x, world_y, world_z)).T
+
+
+@torch.inference_mode()
 def find_grasps():
     global queue, device, queue_mtx
 
@@ -253,11 +311,22 @@ def find_grasps():
             
             try:
                 msgs, poses = list(zip(*q))
-                pts = [ # a list of gpu Tensors
-                    torch.Tensor(
-                        ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msg)
-                    ).to(device)
-                    for msg in msgs]
+                with TimeIt("ros_numpy"):
+
+                    pts = [
+                            np.frombuffer(
+                                msg.data, dtype=np.float32
+                            ).reshape(msg.height, msg.width, -1).copy()
+                        for msg in msgs
+                    ]
+                    breakpoint()
+                    print("cat")
+
+                    # pts = [ # a list of gpu Tensors
+                    #     torch.Tensor(
+                    #         ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msg)
+                    #     ).to(device)
+                    #     for msg in msgs]
                 poses = torch.Tensor(np.stack(poses)).to(device)
             except ValueError as e:
                 print(e)
@@ -296,8 +365,12 @@ def find_grasps():
                     pts[i].unsqueeze(0), pose.unsqueeze(0)
                 )[0]
                 valid = in_bounds(world_pc)
-
                 pts[i] = pts[i][valid]
+
+        ## ensure nonzero
+        if sum(len(pt) for pt in pts) == 0:
+            print("No points in bounds")
+            return
 
         ## Transform all point clouds into the frame of the most recent image
         with TimeIt('Transform points to latest camera frame'):
@@ -393,8 +466,9 @@ def depth_callback(depth_msg):
         queue.append((depth_msg, ee_tf))
 
 # subscribe to throttled point cloud
-depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
+# depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
 # depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
+depth_sub = rospy.Subscriber('/camera/depth/image_raw', numpy_msg(Image), depth_callback, queue_size=1)
 ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
 while not rospy.is_shutdown():
     print("##########################################################")
