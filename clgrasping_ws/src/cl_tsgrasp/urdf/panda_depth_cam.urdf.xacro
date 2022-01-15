@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda_depth_cam">
+
+  <!-- include Panda arm -->
+  <xacro:include filename="$(find franka_description)/robots/panda_arm.urdf.xacro"/>
+  
+  <!-- include depth camera -->
+  <xacro:include filename="$(find cl_tsgrasp)/urdf/depth_cam.urdf.xacro"/>
+  <!-- place depth camera on arm wrist -->
+  <joint name="wrist_to_depth_cam" type="fixed">
+    <parent link="panda_link6"/>
+    <child link="depth_cam_link"/>
+    <origin xyz="0.15 0 0" rpy="0 0 -1.5708"/>
+  </joint>
+
+</robot>
