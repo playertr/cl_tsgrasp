@@ -7,3 +7,5 @@
 .catkin_workspace
 frames.gv
 *.tar
+*/logs/*
+*.catkin_tools
