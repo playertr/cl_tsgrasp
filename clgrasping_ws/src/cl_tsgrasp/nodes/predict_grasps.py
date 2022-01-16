@@ -11,7 +11,7 @@ from nn.load_model import load_model
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import Header
-from sensor_msgs.msg import PointCloud2, PointField, Image
+from sensor_msgs.msg import PointCloud2, PointField
 from rospy.numpy_msg import numpy_msg
 from cl_tsgrasp.msg import Grasps
 import sensor_msgs.point_cloud2 as pcl2
@@ -31,11 +31,11 @@ import MinkowskiEngine as ME
 
 ## global constants
 QUEUE_LEN       = 8
-PTS_PER_FRAME   = 100
+PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0.5
-TOP_K           = 1
-BOUNDS          = [[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]] # (xyz_lower, xyz_upper)
+TOP_K           = 100
+BOUNDS          = torch.Tensor([[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0.1034
@@ -80,35 +80,38 @@ class TimeIt:
 
 
 # https://stackoverflow.com/questions/59387182/construct-a-rotation-matrix-in-pytorch
+@torch.jit.script
 @torch.inference_mode()
-def eul_to_rotm(roll, pitch, yaw):
+def eul_to_rotm(roll: float, pitch: float, yaw: float):
     """Convert euler angles to rotation matrix."""
-    roll = torch.Tensor([roll])
-    pitch = torch.Tensor([pitch])
-    yaw = torch.Tensor([yaw])
+    roll = torch.tensor([roll])
+    pitch = torch.tensor([pitch])
+    yaw = torch.tensor([yaw])
 
     tensor_0 = torch.zeros(1)
     tensor_1 = torch.ones(1)
 
     RX = torch.stack([
                     torch.stack([tensor_1, tensor_0, tensor_0]),
-                    torch.stack([tensor_0, cos(roll), -sin(roll)]),
-                    torch.stack([tensor_0, sin(roll), cos(roll)])]).reshape(3,3)
+                    torch.stack([tensor_0, torch.cos(roll), -torch.sin(roll)]),
+                    torch.stack([tensor_0, torch.sin(roll), torch.cos(roll)])]).reshape(3,3)
 
     RY = torch.stack([
-                    torch.stack([cos(pitch), tensor_0, sin(pitch)]),
+                    torch.stack([torch.cos(pitch), tensor_0, torch.sin(pitch)]),
                     torch.stack([tensor_0, tensor_1, tensor_0]),
-                    torch.stack([-sin(pitch), tensor_0, cos(pitch)])]).reshape(3,3)
+                    torch.stack([-torch.sin(pitch), tensor_0, torch.cos(pitch)])]).reshape(3,3)
 
     RZ = torch.stack([
-                    torch.stack([cos(yaw), -sin(yaw), tensor_0]),
-                    torch.stack([sin(yaw), cos(yaw), tensor_0]),
+                    torch.stack([torch.cos(yaw), -torch.sin(yaw), tensor_0]),
+                    torch.stack([torch.sin(yaw), torch.cos(yaw), tensor_0]),
                     torch.stack([tensor_0, tensor_0, tensor_1])]).reshape(3,3)
 
     R = torch.mm(RZ, RY)
     R = torch.mm(R, RX)
     return R
 
+@torch.jit.script
+@torch.inference_mode()
 def inverse_homo(tf):
     """Compute inverse of homogeneous transformation matrix.
 
@@ -120,7 +123,7 @@ def inverse_homo(tf):
     t = R.T @ tf[0:3, 3].reshape(3, 1)
     return torch.cat([
         torch.cat([R.T, -t], dim=1),
-        torch.Tensor([[0, 0, 0, 1]]).to(R.device)
+        torch.tensor([[0, 0, 0, 1]]).to(R.device)
         ],dim=0
     )
 
@@ -174,25 +177,28 @@ def transform_vec(x: torch.Tensor, tf: torch.Tensor) -> torch.Tensor:
 
     return (x_homog @ tf.transpose(-2, -1))[..., :3]
 
+@torch.jit.script
 @torch.inference_mode()
-def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, gripper_depth=GRIPPER_DEPTH):
+def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, gripper_depth: float=GRIPPER_DEPTH):
     """Calculate the SE(3) transforms corresponding to each predicted coord/approach/baseline/grasp_width grasp.
 
+    Unbatched for torch.jit.script.
+
     Args:
-        contact_pts (torch.Tensor): (..., N, 3) contact points predicted
-        baseline_dir (torch.Tensor): (..., N, 3) gripper baseline directions
-        approach_dir (torch.Tensor): (..., N, 3) gripper approach directions
-        grasp_width (torch.Tensor): (..., N, 3) gripper width
+        contact_pts (torch.Tensor): (N, 3) contact points predicted
+        baseline_dir (torch.Tensor): (N, 3) gripper baseline directions
+        approach_dir (torch.Tensor): (N, 3) gripper approach directions
+        grasp_width (torch.Tensor): (N, 3) gripper width
 
     Returns:
-        pred_grasp_tfs (torch.Tensor): (..., N, 4, 4) homogeneous grasp poses.
+        pred_grasp_tfs (torch.Tensor): (N, 4, 4) homogeneous grasp poses.
     """
-    shape = contact_pts.shape[:-1]
-    grasps_R = torch.stack([baseline_dir, torch.cross(approach_dir, baseline_dir), approach_dir], axis=-1)
+    N = contact_pts.shape[0]
+    grasps_R = torch.stack([baseline_dir, torch.cross(approach_dir, baseline_dir), approach_dir], dim=-1)
     grasps_t = contact_pts + grasp_width/2 * baseline_dir - gripper_depth * approach_dir
-    ones = torch.ones((*shape, 1, 1), device=contact_pts.device)
-    zeros = torch.zeros((*shape, 1, 3), device=contact_pts.device)
-    homog_vec = torch.cat([zeros, ones], axis=-1)
+    ones = torch.ones((N, 1, 1), device=contact_pts.device)
+    zeros = torch.zeros((N, 1, 3), device=contact_pts.device)
+    homog_vec = torch.cat([zeros, ones], dim=-1)
 
     pred_grasp_tfs = torch.cat([
         torch.cat([grasps_R, grasps_t.unsqueeze(-1)], dim=-1), 
@@ -229,7 +235,9 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
         coordinates = coords,
         features = torch.ones((len(coords), 1), device=coords.device)
     )
-    class_logits, baseline_dir, approach_dir, grasp_offset = tsgraspnet.model.forward(stensor)
+
+    with TimeIt("tsgraspnet.model.forward"):
+        class_logits, baseline_dir, approach_dir, grasp_offset = tsgraspnet.model.forward(stensor)
 
     ## Return the grasp predictions for the latest point cloud
     idcs = coords[:,1] == coords[:,1].max()
@@ -237,62 +245,20 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
         class_logits[idcs], baseline_dir[idcs], approach_dir[idcs], grasp_offset[idcs]
     )
 
-# @torch.inference_mode()
-# def depth_to_pointcloud(depth, fov=np.pi/6):
-#     """Convert depth image to pointcloud given camera intrinsics, from acronym.scripts.acronym_render_observations
-
-#     Args:
-#         depth (np.torch.Tensor): Depth image.
-
-#     Returns:
-#         torch.Tensor: Point cloud.
-#     """
-#     fy = fx = 0.5 / np.tan(fov * 0.5)  # aspectRatio is one.
-
-#     height = depth.shape[0]
-#     width = depth.shape[1]
-
-#     mask = torch.where(depth > 0)
-
-#     x = mask[1]
-#     y = mask[0]
-#     normalized_x = (x - width * 0.5) / width
-#     normalized_y = (y - height * 0.5) / height
-
-#     world_x = normalized_x.reshape(-1, 1) * depth[y, x] / fx
-#     world_y = normalized_y.reshape(-1, 1) * depth[y, x] / fy
-#     world_z = depth[y, x]
-
-#     return torch.cat([world_x, world_y, world_z], dim=1)
-
-def depth_to_pointcloud(depth, fov=np.pi/6):
-    """Convert depth image to pointcloud given camera intrinsics, from acronym.scripts.acronym_render_observations
-
-    Args:
-        depth (np.ndarray): Depth image.
-
-    Returns:
-        np.ndarray: Point cloud.
-    """
-    fy = fx = 0.5 / np.tan(fov * 0.5)  # aspectRatio is one.
-
-    height = depth.shape[0]
-    width = depth.shape[1]
-
-    mask = np.where(depth > 0)
-
-    x = mask[1]
-    y = mask[0]
-
-    normalized_x = (x.astype(np.float32) - width * 0.5) / width
-    normalized_y = (y.astype(np.float32) - height * 0.5) / height
-
-    world_x = normalized_x * depth[y, x] / fx
-    world_y = normalized_y * depth[y, x] / fy
-    world_z = depth[y, x]
-
-    return np.vstack((world_x, world_y, world_z)).T
-
+@torch.jit.script
+@torch.inference_mode()
+def in_bounds(world_pts, BOUNDS):
+    """Remove any points that are out of bounds"""
+    x, y, z = world_pts[..., 0], world_pts[..., 1], world_pts[..., 2]
+    in_bounds = (
+        (x > BOUNDS[0][0]) * 
+        (y > BOUNDS[0][1]) * 
+        (z > BOUNDS[0][2]) * 
+        (x < BOUNDS[1][0]) *
+        (y < BOUNDS[1][1]) * 
+        (z < BOUNDS[1][2] )
+    )
+    return in_bounds
 
 @torch.inference_mode()
 def find_grasps():
@@ -312,21 +278,13 @@ def find_grasps():
             try:
                 msgs, poses = list(zip(*q))
                 with TimeIt("ros_numpy"):
-
                     pts = [
-                            np.frombuffer(
-                                msg.data, dtype=np.float32
-                            ).reshape(msg.height, msg.width, -1).copy()
-                        for msg in msgs
-                    ]
-                    breakpoint()
-                    print("cat")
-
-                    # pts = [ # a list of gpu Tensors
-                    #     torch.Tensor(
-                    #         ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msg)
-                    #     ).to(device)
-                    #     for msg in msgs]
+                            ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msg, remove_nans=False).reshape(-1,3)
+                        for msg in msgs]
+                actual_device = device
+                # device = "cpu"
+                with TimeIt("pts_to_gpu"):
+                    pts = [torch.from_numpy(pt.astype(np.float32)).to(device) for pt in pts]
                 poses = torch.Tensor(np.stack(poses)).to(device)
             except ValueError as e:
                 print(e)
@@ -335,42 +293,27 @@ def find_grasps():
 
             header = msgs[-1].header
 
-        with TimeIt('Downsample XYZ'):
-
-            ## downsample point cloudsproportion of points -- will that result in same sampling distribution?
-            for i in range(len(pts)):
-                pts_to_keep = int(PTS_PER_FRAME / 90_000 * len(pts[i]))
-
-                idxs = torch.randperm(len(pts[i]), dtype=torch.int32, device=device)[:pts_to_keep].sort()[0].long()
-
-                pts[i] = pts[i][idxs]
-
-        with TimeIt('Bound point cloud:'):
-            
-            def in_bounds(world_pts):
-                """Remove any points that are out of bounds"""
-                x, y, z = world_pts[..., 0], world_pts[..., 1], world_pts[..., 2]
-                in_bounds = (
-                    (x > BOUNDS[0][0]) * 
-                    (y > BOUNDS[0][1]) * 
-                    (z > BOUNDS[0][2]) * 
-                    (x < BOUNDS[1][0]) *
-                    (y < BOUNDS[1][1]) * 
-                    (z < BOUNDS[1][2] )
-                )
-                return in_bounds
-            
+        with TimeIt('Bound point cloud:'):    
             for i, pose in zip(range(len(pts)), poses):
                 world_pc = transform_vec(
                     pts[i].unsqueeze(0), pose.unsqueeze(0)
                 )[0]
-                valid = in_bounds(world_pc)
+                valid = in_bounds(world_pc, BOUNDS)
                 pts[i] = pts[i][valid]
 
         ## ensure nonzero
         if sum(len(pt) for pt in pts) == 0:
             print("No points in bounds")
             return
+            
+        with TimeIt('Downsample XYZ'):
+
+            ## downsample point cloudsproportion of points -- will that result in same sampling distribution?
+            for i in range(len(pts)):
+                pts_to_keep = int(PTS_PER_FRAME / 90_000 * len(pts[i]))
+                idxs = torch.randperm(len(pts[i]), dtype=torch.int32, device=device)[:pts_to_keep].sort()[0].long()
+
+                pts[i] = pts[i][idxs]
 
         ## Transform all point clouds into the frame of the most recent image
         with TimeIt('Transform points to latest camera frame'):
@@ -384,11 +327,9 @@ def find_grasps():
             ]
         
         with TimeIt('Find Grasps'):
-            # pcs = pcs.unsqueeze(0)
+
             with TimeIt('NN Forward:'):
                 outputs = infer_grasps(pl_model, pts, grid_size=pl_model.model.grid_size)
-                # with torch.inference_mode():
-                #     outputs = pl_model.forward(pcs)
 
             class_logits, baseline_dir, approach_dir, grasp_offset = outputs
             positions = pts[-1]
@@ -429,13 +370,13 @@ def find_grasps():
         with TimeIt('Publish Colored Point Cloud'):
             #  https://gist.github.com/lucasw/ea04dcd65bc944daea07612314d114bb
             # (N x 4) array, with fourth item as alpha
-
-            # as a test, print ALL of the processed points in the same frame.
-            # confs = torch.sigmoid(class_logits).reshape(-1, 1)
-            # cloud_points = positions.reshape(-1, 3)
-
             cloud_points = positions
-            cloud_points = torch.cat([cloud_points, confs], dim=1).cpu().numpy()
+            downsample = 1
+            cloud_points = torch.cat([
+                cloud_points[::downsample], 
+                confs[::downsample]], 
+                dim=1
+            ).cpu().numpy()
             fields = [PointField('x', 0, PointField.FLOAT32, 1),
                 PointField('y', 4, PointField.FLOAT32, 1),
                 PointField('z', 8, PointField.FLOAT32, 1),
@@ -467,8 +408,7 @@ def depth_callback(depth_msg):
 
 # subscribe to throttled point cloud
 # depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
-# depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
-depth_sub = rospy.Subscriber('/camera/depth/image_raw', numpy_msg(Image), depth_callback, queue_size=1)
+depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
 ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
 while not rospy.is_shutdown():
     print("##########################################################")
