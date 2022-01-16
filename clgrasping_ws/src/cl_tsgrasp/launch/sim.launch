@@ -140,6 +140,9 @@
   <!-- Node to transform PoseStamped[] into PoseArray for rviz visualization -->
   <node pkg="topic_tools" type="transform" name="pose_translater"
     args="/tsgrasp/grasps /tsgrasp/grasps_pose geometry_msgs/PoseArray 'geometry_msgs.msg.PoseArray(header=m.header, poses=m.poses)' --import geometry_msgs --wait-for-start"/>
+  
+  <!-- Node to publish grasp poses for visualization -->
+  <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers" />
 
   <!-- Node to expose Action server for moving end effector to a pose -->
   <node pkg="cl_tsgrasp" type="motion_server.py" name="motion_server" />
