@@ -9,3 +9,5 @@ frames.gv
 *.tar
 */logs/*
 *.catkin_tools
+*.ckpt
+*.pyc
