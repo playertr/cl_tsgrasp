@@ -1,3 +1,6 @@
 [submodule "clgrasping_ws/src/universal_robot_ign"]
 	path = clgrasping_ws/src/universal_robot_ign
 	url = git@github.com:gezp/universal_robot_ign.git
+[submodule "clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp"]
+	path = clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp
+	url = git@github.com:playertr/tsgrasp.git
