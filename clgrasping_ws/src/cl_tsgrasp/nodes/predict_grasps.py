@@ -31,7 +31,7 @@ import MinkowskiEngine as ME
 from pytorch3d.ops import sample_farthest_points
 
 ## global constants
-QUEUE_LEN       = 1
+QUEUE_LEN       = 8
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0.5
@@ -209,17 +209,26 @@ def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, grip
     ], dim=-2)
     return pred_grasp_tfs
 
+@torch.jit.script
 @torch.inference_mode()
-def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> torch.Tensor:
-    """Run a sparse convolutional network on a list of consecutive point clouds, and return the grasp predictions for the last point cloud. Each point cloud may have different numbers of points."""
+def discretize(positions: torch.Tensor, grid_size: float) -> torch.Tensor:
+    """Truncate each position to an integer grid."""
+    return (positions / grid_size).int()
 
-    ## Convert list of point clouds into matrix of 4D coordinate
-    def prepend_coordinate(matrix: torch.Tensor, coord: int):
+@torch.jit.script
+@torch.inference_mode()
+def prepend_coordinate(matrix: torch.Tensor, coord: int):
         """Concatenate a constant column of value `coord` before a 2D matrix."""
         return torch.column_stack([
             coord * torch.ones((len(matrix), 1), device=matrix.device),
             matrix
         ])
+
+@torch.inference_mode()
+def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> torch.Tensor:
+    """Run a sparse convolutional network on a list of consecutive point clouds, and return the grasp predictions for the last point cloud. Each point cloud may have different numbers of points."""
+
+    ## Convert list of point clouds into matrix of 4D coordinate
     coords = list(map(
         lambda mtx_coo: prepend_coordinate(*mtx_coo),
         zip(points, range(len(points)))
@@ -228,9 +237,6 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
     coords = prepend_coordinate(coords, 0) # add dummy batch dimension
 
     ## Discretize coordinates to integer grid
-    def discretize(positions: torch.Tensor, grid_size: float) -> torch.Tensor:
-        """Truncate each position to an integer grid."""
-        return (positions / grid_size).int()
     coords = discretize(coords, grid_size)
 
     ## Construct a Minkoswki sparse tensor and run forward inference
@@ -239,13 +245,13 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
         features = torch.ones((len(coords), 1), device=coords.device)
     )
 
-    with TimeIt("tsgraspnet.model.forward"):
+    with TimeIt("   tsgraspnet.model.forward"):
         class_logits, baseline_dir, approach_dir, grasp_offset = tsgraspnet.model.forward(stensor)
 
     ## Return the grasp predictions for the latest point cloud
     idcs = coords[:,1] == coords[:,1].max()
     return(
-        class_logits[idcs], baseline_dir[idcs], approach_dir[idcs], grasp_offset[idcs]
+        class_logits[idcs], baseline_dir[idcs], approach_dir[idcs], grasp_offset[idcs], points[-1]
     )
 
 @torch.jit.script
@@ -263,6 +269,81 @@ def in_bounds(world_pts, BOUNDS):
     )
     return in_bounds
 
+def bound_point_cloud(pts, poses):
+    for i, pose in zip(range(len(pts)), poses):
+        world_pc = transform_vec(
+            pts[i].unsqueeze(0), pose.unsqueeze(0)
+        )[0]
+        valid = in_bounds(world_pc, BOUNDS)
+        pts[i] = pts[i][valid]
+    
+    ## ensure nonzero
+    if sum(len(pt) for pt in pts) == 0:
+        print("No points in bounds")
+        return
+
+    return pts
+
+@torch.jit.script
+@torch.inference_mode()
+def downsample_xyz(pts: List[torch.Tensor], pts_per_frame: int) -> List[torch.Tensor]:
+    ## downsample point clouds proportion of points -- will that result in same sampling distribution?
+    for i in range(len(pts)):
+        pts_to_keep = int(pts_per_frame / 90_000 * len(pts[i]))
+        idxs = torch.randperm(
+            len(pts[i]), dtype=torch.int32, device=pts[i].device
+        )[:pts_to_keep].sort()[0].long()
+
+        pts[i] = pts[i][idxs]
+    
+    return pts
+
+def transform_to_camera_frame(pts, poses):
+    ## Transform all point clouds into the frame of the most recent image
+    tf_from_cam_i_to_cam_N = inverse_homo(poses[-1]) @ poses
+    pts =[
+        transform_vec(
+            pts[i].unsqueeze(0), 
+            tf_from_cam_i_to_cam_N[i].unsqueeze(0)
+        )[0]
+        for i in range(len(pts))
+    ]
+    return pts
+
+def identify_grasps(pts):
+    outputs = infer_grasps(pl_model, pts, grid_size=pl_model.model.grid_size)
+
+    class_logits, baseline_dir, approach_dir, grasp_offset, positions = outputs
+
+    # only retain the information from the latest (-1) frame
+    grasps = build_6dof_grasps(positions, baseline_dir, approach_dir, grasp_offset)
+    grasps = transform_to_eq_pose(grasps)
+    confs = torch.sigmoid(class_logits)
+
+    return grasps, confs
+
+def filter_grasps(grasps, confs):
+
+    vals, top_idcs = torch.topk(confs.squeeze(), k=3*TOP_K, sorted=True)
+    grasps = grasps[top_idcs]
+    confs = confs[top_idcs]
+
+    # grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
+    # confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
+
+    if grasps.shape[0] == 0:
+        return None, None
+
+    # furthest point sampling by position
+    pos = grasps[:,:3,3]
+    _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
+    selected_idcs = selected_idcs.squeeze()
+
+    grasps = grasps[selected_idcs]
+    confs = confs[selected_idcs]
+
+    return grasps, confs
+
 @torch.inference_mode()
 def find_grasps():
     global queue, device, queue_mtx
@@ -276,17 +357,15 @@ def find_grasps():
                 # queue.clear()
                 queue.popleft()
 
-            # print(f"Processing three messages: {[p.header.stamp for p in q]}")
-            
             try:
                 msgs, poses = list(zip(*q))
-                with TimeIt("ros_numpy"):
+                with TimeIt("   ros_numpy: "):
                     pts = [
                             ros_numpy.point_cloud2.pointcloud2_to_xyz_array(msg, remove_nans=False).reshape(-1,3)
                         for msg in msgs]
-                actual_device = device
+
                 # device = "cpu"
-                with TimeIt("pts_to_gpu"):
+                with TimeIt("   pts_to_gpu: "):
                     pts = [torch.from_numpy(pt.astype(np.float32)).to(device) for pt in pts]
                 poses = torch.Tensor(np.stack(poses)).to(device)
             except ValueError as e:
@@ -296,72 +375,32 @@ def find_grasps():
 
             header = msgs[-1].header
 
-        with TimeIt('Bound point cloud:'):    
-            for i, pose in zip(range(len(pts)), poses):
-                world_pc = transform_vec(
-                    pts[i].unsqueeze(0), pose.unsqueeze(0)
-                )[0]
-                valid = in_bounds(world_pc, BOUNDS)
-                pts[i] = pts[i][valid]
+        ## Processing pipeline
 
-        ## ensure nonzero
-        if sum(len(pt) for pt in pts) == 0:
-            print("No points in bounds")
-            return
-            
-        with TimeIt('Downsample XYZ'):
+        # Start with pts, a list of Torch point clouds.
+        # Remove points that are outside of the boundaries in the global frame.
+        with TimeIt('Bound Point CLoud'):
+            pts             = bound_point_cloud(pts, poses)
 
-            ## downsample point cloudsproportion of points -- will that result in same sampling distribution?
-            for i in range(len(pts)):
-                pts_to_keep = int(PTS_PER_FRAME / 90_000 * len(pts[i]))
-                idxs = torch.randperm(len(pts[i]), dtype=torch.int32, device=device)[:pts_to_keep].sort()[0].long()
+        # Downsample the points with uniform probability.
+        with TimeIt('Downsample Points'):
+            pts             = downsample_xyz(pts, PTS_PER_FRAME)
 
-                pts[i] = pts[i][idxs]
+        # Transform the points into the frame of the last camera perspective.
+        with TimeIt('Transform to Camera Frame'):
+            pts             = transform_to_camera_frame(pts, poses)
 
-        ## Transform all point clouds into the frame of the most recent image
-        with TimeIt('Transform points to latest camera frame'):
-            tf_from_cam_i_to_cam_N = inverse_homo(poses[-1]) @ poses
-            pts =[
-                transform_vec(
-                    pts[i].unsqueeze(0), 
-                    tf_from_cam_i_to_cam_N[i].unsqueeze(0)
-                )[0]
-                for i in range(len(pts))
-            ]
-        
+        # Run the NN to identify grasp poses and confidences.
         with TimeIt('Find Grasps'):
+            grasps, confs   = identify_grasps(pts)
+            all_confs       = confs.clone() # keep the pointwise confs for plotting later
 
-            with TimeIt('NN Forward:'):
-                outputs = infer_grasps(pl_model, pts, grid_size=pl_model.model.grid_size)
-
-            class_logits, baseline_dir, approach_dir, grasp_offset = outputs
-            positions = pts[-1]
-
-            # only retain the information from the latest (-1) frame
-            grasps = build_6dof_grasps(positions, baseline_dir, approach_dir, grasp_offset)
-            grasps = transform_to_eq_pose(grasps)
-            confs = torch.sigmoid(class_logits)
-
+        # Filter the grasps by thresholding and furthest-point sampling.
         with TimeIt('Filter Grasps'):
-            # filter grasps
+            grasps, confs   = filter_grasps(grasps, confs)
 
-            # vals, top_idcs = torch.topk(confs.squeeze(), k=3*TOP_K, sorted=True)
-            # grasps = grasps[top_idcs]
-            # grasp_confs = confs[top_idcs]
-
-            grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
-            grasp_confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
-
-            # furthest point sampling by position
-            pos = grasps[:,:3,3]
-            _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
-            # breakpoint()
-            # print('foobar!')
-            selected_idcs = selected_idcs.squeeze()
-
-            grasps = grasps[selected_idcs]
-            grasp_confs = grasp_confs[selected_idcs]
-
+        if grasps is None: return
+        
         with TimeIt('Publish Grasps'):
         
             # convert homogeneous poses to ros message poses
@@ -378,18 +417,18 @@ def find_grasps():
 
             grasps_msg = Grasps()
             grasps_msg.poses = [q_v_to_pose(q, v) for q, v in zip(qs, vs)]
-            grasps_msg.confs = grasp_confs
+            grasps_msg.confs = confs
             grasps_msg.header = copy.copy(header)
             grasp_pub.publish(grasps_msg)
 
         with TimeIt('Publish Colored Point Cloud'):
             #  https://gist.github.com/lucasw/ea04dcd65bc944daea07612314d114bb
             # (N x 4) array, with fourth item as alpha
-            cloud_points = positions
+            cloud_points = pts[-1]
             downsample = 1
             cloud_points = torch.cat([
                 cloud_points[::downsample], 
-                confs[::downsample]], 
+                all_confs[::downsample]], 
                 dim=1
             ).cpu().numpy()
             fields = [PointField('x', 0, PointField.FLOAT32, 1),
