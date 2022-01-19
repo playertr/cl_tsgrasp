@@ -84,7 +84,6 @@ class TimeIt:
 
 # https://stackoverflow.com/questions/59387182/construct-a-rotation-matrix-in-pytorch
 @torch.jit.script
-@torch.inference_mode()
 def eul_to_rotm(roll: float, pitch: float, yaw: float):
     """Convert euler angles to rotation matrix."""
     roll = torch.tensor([roll])
@@ -114,7 +113,6 @@ def eul_to_rotm(roll: float, pitch: float, yaw: float):
     return R
 
 @torch.jit.script
-@torch.inference_mode()
 def inverse_homo(tf):
     """Compute inverse of homogeneous transformation matrix.
 
@@ -130,7 +128,6 @@ def inverse_homo(tf):
         ],dim=0
     )
 
-@torch.inference_mode()
 def transform_to_eq_pose(poses):
     """Apply the static frame transformation between the network output and the 
     input expected by the servoing logic at /panda/cartesian_impendance_controller/equilibrium_pose.
@@ -148,7 +145,6 @@ def transform_to_eq_pose(poses):
     ], dim=0).to(poses.device)
     return poses @ tf
 
-@torch.inference_mode()
 def transform_vec(x: torch.Tensor, tf: torch.Tensor) -> torch.Tensor:
     """Transform 3D vector `x` by homogenous transformation `tf`.
 
@@ -181,7 +177,6 @@ def transform_vec(x: torch.Tensor, tf: torch.Tensor) -> torch.Tensor:
     return (x_homog @ tf.transpose(-2, -1))[..., :3]
 
 @torch.jit.script
-@torch.inference_mode()
 def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, gripper_depth: float=GRIPPER_DEPTH):
     """Calculate the SE(3) transforms corresponding to each predicted coord/approach/baseline/grasp_width grasp.
 
@@ -210,13 +205,11 @@ def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, grip
     return pred_grasp_tfs
 
 @torch.jit.script
-@torch.inference_mode()
 def discretize(positions: torch.Tensor, grid_size: float) -> torch.Tensor:
     """Truncate each position to an integer grid."""
     return (positions / grid_size).int()
 
 @torch.jit.script
-@torch.inference_mode()
 def prepend_coordinate(matrix: torch.Tensor, coord: int):
         """Concatenate a constant column of value `coord` before a 2D matrix."""
         return torch.column_stack([
@@ -224,7 +217,6 @@ def prepend_coordinate(matrix: torch.Tensor, coord: int):
             matrix
         ])
 
-@torch.inference_mode()
 def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> torch.Tensor:
     """Run a sparse convolutional network on a list of consecutive point clouds, and return the grasp predictions for the last point cloud. Each point cloud may have different numbers of points."""
 
@@ -255,7 +247,6 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
     )
 
 @torch.jit.script
-@torch.inference_mode()
 def in_bounds(world_pts, BOUNDS):
     """Remove any points that are out of bounds"""
     x, y, z = world_pts[..., 0], world_pts[..., 1], world_pts[..., 2]
@@ -285,7 +276,6 @@ def bound_point_cloud(pts, poses):
     return pts
 
 @torch.jit.script
-@torch.inference_mode()
 def downsample_xyz(pts: List[torch.Tensor], pts_per_frame: int) -> List[torch.Tensor]:
     ## downsample point clouds proportion of points -- will that result in same sampling distribution?
     for i in range(len(pts)):
