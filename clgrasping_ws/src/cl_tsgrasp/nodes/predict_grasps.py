@@ -28,14 +28,17 @@ import copy
 from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
 import math
 import MinkowskiEngine as ME
+from pytorch3d.ops import sample_farthest_points
 
 ## global constants
-QUEUE_LEN       = 8
+QUEUE_LEN       = 1
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0.5
 TOP_K           = 100
-BOUNDS          = torch.Tensor([[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]]) # (xyz_lower, xyz_upper)
+# BOUNDS          = torch.Tensor([[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]]) # (xyz_lower, xyz_upper)
+
+BOUNDS          = torch.Tensor([[-0.2, -0.3, 0.3], [0.3, 0.3, 0.65]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0.1034
@@ -339,16 +342,28 @@ def find_grasps():
             grasps = transform_to_eq_pose(grasps)
             confs = torch.sigmoid(class_logits)
 
+        with TimeIt('Filter Grasps'):
+            # filter grasps
+
+            # vals, top_idcs = torch.topk(confs.squeeze(), k=3*TOP_K, sorted=True)
+            # grasps = grasps[top_idcs]
+            # grasp_confs = confs[top_idcs]
+
+            grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
+            grasp_confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
+
+            # furthest point sampling by position
+            pos = grasps[:,:3,3]
+            _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
+            # breakpoint()
+            # print('foobar!')
+            selected_idcs = selected_idcs.squeeze()
+
+            grasps = grasps[selected_idcs]
+            grasp_confs = grasp_confs[selected_idcs]
 
         with TimeIt('Publish Grasps'):
-            # filter grasps
-            vals, top_idcs = torch.topk(confs.squeeze(), k=TOP_K, sorted=True)
-
-            grasps = grasps[top_idcs]
-            grasp_confs = confs[top_idcs].cpu().numpy()
-            # grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
-            # grasp_confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD].cpu().numpy()
-
+        
             # convert homogeneous poses to ros message poses
             qs = rotation_matrix_to_quaternion(grasps[:,:3,:3].contiguous(), order = QuaternionCoeffOrder.XYZW).cpu().numpy()
             vs = grasps[:,:3,3].cpu().numpy()
