@@ -1,26 +1,33 @@
 #! /usr/bin/env python
 # Execute finite state machine for grasping.
 
+from ast import Del
 import rospy
 import smach_ros
 import smach
-from franka_gripper.msg import MoveAction, GraspAction
 import actionlib
 import cl_tsgrasp.msg
+from franka_gripper.msg import MoveAction, GraspAction
 
 # main
 def main():
     rospy.init_node('smach_state_machine')
 
+    # wait for services called within States
+    # (located here because State.__init__ can't block)
+    rospy.loginfo("Waiting for services.")
+    rospy.wait_for_service("gazebo/delete_model")
+    rospy.wait_for_service("gazebo/spawn_sdf_model")
+    
+    actionlib.SimpleActionClient('/panda/franka_gripper/move', MoveAction).wait_for_server()
+    actionlib.SimpleActionClient('/panda/franka_gripper/grasp', GraspAction).wait_for_server()
+
     # Start end-effector motion client
     motion_client = actionlib.SimpleActionClient('/motion_server', cl_tsgrasp.msg.MotionAction)
     motion_client.wait_for_server()
 
-    # wait for gripper servers. Hacky and seems wrong.
-    actionlib.SimpleActionClient('/panda/franka_gripper/move', MoveAction).wait_for_server()
-    actionlib.SimpleActionClient('/panda/franka_gripper/grasp', GraspAction).wait_for_server()
-
-    from states import OpenJaws, GoToOrbitalPose, TerminalHoming, CloseJaws, ResetPos
+    # import states AFTER this node and the services are initialized
+    from states import OpenJaws, GoToOrbitalPose, TerminalHoming, CloseJaws, ResetPos, SpawnNewItem, Delay
 
     # Create a SMACH state machine
     sm = smach.StateMachine(outcomes=['SUCCESS', 'FAIL'])
@@ -46,7 +53,7 @@ def main():
                 GoToOrbitalPose(motion_client),
                 transitions={
                     'in_orbital_pose': 'TERMINAL_HOMING',
-                    'not_in_orbital_pose': 'GO_TO_ORBITAL_POSE'
+                    'not_in_orbital_pose': 'GRASP_FAIL'
                 }
             )
             smach.StateMachine.add(
@@ -76,14 +83,30 @@ def main():
                 }
             )
         
-        smach.StateMachine.add('GRASP', grasp_sm, 
+        
+        smach.StateMachine.add('SPAWN_NEW_ITEM', SpawnNewItem(),
             transitions={
-                'GRASP_SUCCESS':'SUCCESS',
-                'GRASP_FAIL':'FAIL'
+                'spawned_new_item':'DELAY'
             }
         )
-
-
+        smach.StateMachine.add('RESET_INITIAL_POS', ResetPos,
+            transitions={
+                'succeeded': 'SPAWN_NEW_ITEM',
+                'aborted': 'RESET_INITIAL_POS',
+                'preempted': 'FAIL'
+            }
+        )
+        smach.StateMachine.add('DELAY', Delay(1),
+            transitions={
+                'delayed':'SPAWN_NEW_ITEM'
+            }
+        )
+        smach.StateMachine.add('GRASP', grasp_sm, 
+            transitions={
+                'GRASP_SUCCESS':'RESET_INITIAL_POS',
+                'GRASP_FAIL':'RESET_INITIAL_POS'
+            }
+        )
 
     # Create and start the introspection server
     sis = smach_ros.IntrospectionServer('server_name', sm, '/SM_ROOT')
