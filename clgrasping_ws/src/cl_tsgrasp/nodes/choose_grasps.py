@@ -3,9 +3,10 @@
 
 import rospy
 from cl_tsgrasp.msg import Grasps
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from rospy.numpy_msg import numpy_msg
 import numpy as np
+from tf.transformations import quaternion_matrix
 
 from utils import TransformFrames
 
@@ -17,32 +18,82 @@ final_goal_pose_pub = rospy.Publisher(name='/tsgrasp/final_goal_pose',
 tf = TransformFrames()
 
 final_goal_pose = None
+grasp_lpf = None
+
+def pose_to_homo(pose):
+    tf = quaternion_matrix(np.array([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]))
+    tf[:3,3] = pose.position.x, pose.position.y, pose.position.z
+    return tf
+
+"""The (5,3) matrix of control points for a single gripper.
+    Note: these may be in the wrong frame.
+"""
+cps = np.array([
+    [ 0.0000000e+00,  0.0000000e+00,  0.0000000e+00],
+    [ 5.2687433e-02, -5.9955313e-05,  7.5273141e-02],
+    [-5.2687433e-02,  5.9955313e-05,  7.5273141e-02],
+    [ 5.2687433e-02, -5.9955313e-05,  1.0527314e-01],
+    [-5.2687433e-02,  5.9955313e-05,  1.0527314e-01]])
+cps = np.hstack([cps, np.ones((len(cps), 1))]) # make homogeneous
+
+def dist(p1, p2):
+    """Compare two poses by control point distance."""
+    mat1 = pose_to_homo(p1.pose)
+    mat2 = pose_to_homo(p2.pose)
+    return np.mean(
+        (mat1.dot(cps.T) - mat2.dot(cps.T))**2
+    )
+
+class GraspPoseLPF:
+    """A lowpass filter for the terminal grasp pose.
+    On update, this filter picks the BEST grasp that is CLOSEST to the previous selection. This is achieved by selecting the arg max over
+    ```math
+    scores[i] = closest_coeff * exp(-dists[1]/scale) + best_coeff * confs[i]
+    ```
+    """
+    best_coeff    = 1.0 # type: float
+    closest_coeff = 1.0 # type: float
+    scale         = 0.05 # type: float
+
+    best_grasp    = None # type: Pose
+    def __init__(self, grasps, confs):
+        self.reset(grasps, confs)
+
+    def reset(self, grasps, confs):
+        best_grasp_idx = np.argmax(confs)
+        self.best_grasp = grasps[best_grasp_idx]
+
+    def update(self, grasps, confs):
+        dists = np.array([dist(grasp, self.best_grasp) for grasp in grasps])
+        scores = self.closest_coeff * np.exp(-dists/self.scale) + confs
+        i = np.argmax(scores)
+        print("dists[i]")
+        print(dists[i])
+        print("confs[i]")
+        print(confs[i])
+        print("scores[i]")
+        print(scores[i])
+        self.best_grasp = grasps[np.argmax(scores)]
 
 def publish_goal_callback(msg):
     """Identify the best grasp in the Grasps message and publish it."""
+
+    global grasp_lpf
+
     confs = msg.confs
     poses = msg.poses
 
-    ## Latch the goal pose -- do not update after initial update
-    # global final_goal_pose
-    # if final_goal_pose is not None:
-    #     final_goal_pose_pub.publish(final_goal_pose)
-    #     return
-
-    # filter grasps (and confs) that are too low
-    # note: this way of transforming to the world frame is slow
+    # filter the grasps in the world frame (for now)
     world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
-    valid_idx = [world_poses[i].pose.position.z > 0.42 for i in range(len(world_poses))]
-    poses = [poses[i] for i in range(len(poses)) if valid_idx[i]]
-    confs = [confs[i] for i in range(len(confs)) if valid_idx[i]]
 
-    best_grasp_idx = np.argmax(np.array(confs))
-    try:
-        pose = PoseStamped(header=msg.header, pose=poses[best_grasp_idx])
-    except:
-        pose = PoseStamped(header=msg.header, pose=msg.poses[0])
+    if grasp_lpf is None:
+        grasp_lpf = GraspPoseLPF(world_poses, confs)
+    else:
+        grasp_lpf.update(world_poses, confs)
 
-    final_goal_pose = tf.pose_transform(pose, target_frame='panda_link0')
+    best_pose_world_frame = grasp_lpf.best_grasp
+    final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='panda_link0')
+
     final_goal_pose_pub.publish(final_goal_pose)
 
 grasp_sub = rospy.Subscriber(name='/tsgrasp/grasps', 

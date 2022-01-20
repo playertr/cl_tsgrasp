@@ -1,14 +1,11 @@
-#! /home/tim/anaconda3/envs/tsgrasp/bin/python
-# shebang is for the Python3 environment with the network dependencies
+To run this model, first set the tsgrasp commit via
 
-import sys
-sys.path.append("/home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp")
-from tsgrasp.net.lit_tsgraspnet import LitTSGraspNet
+```
+git checkout 5a469b01682d86d3bdd3db965b672ff806d01e79
+```
 
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
-import torch
-
+and use
+```
 cfg_str = """
 training:
   gpus: 4
@@ -40,12 +37,26 @@ model:
     conv1_kernel_size: 3
     dilations:
     - 1 1 1 1
+data:
+  _target_: tsgrasp.data.lit_acronym_renderer_dm.LitTrajectoryDataset
+  data_cfg:
+    num_workers: 4
+    data_proportion_per_epoch: 1
+    dataroot: ${hydra:runtime.cwd}/data/dataset
+    frames_per_traj: 8
+    points_per_frame: 45000
+    augmentations:
+      add_random_jitter: true
+      random_jitter_sigma: 0.0001
+      add_random_rotations: true
+    renderer:
+      height: 300
+      width: 300
+      acronym_repo: /scratch/playert/workdir/acronym
+      mesh_dir: ${hydra:runtime.cwd}/data/obj/
 
 ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_1_15/model.ckpt
 """
+```
 
-def load_model():
-    cfg = OmegaConf.create(cfg_str)
-    pl_model = instantiate(cfg.model, training_cfg=cfg.training)
-    pl_model.load_state_dict(torch.load(cfg.ckpt_path)['state_dict'])
-    return pl_model
+artifact playertr/TSGrasp/model-1lu0nng2:v45

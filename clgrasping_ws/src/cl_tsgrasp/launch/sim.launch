@@ -45,6 +45,7 @@
     <arg name="paused" value="true"/>
     <arg name="gui" value="$(eval not arg('headless'))"/>
     <arg name="use_sim_time" value="true"/>
+    <!-- <arg name="physics" value="ode"/> -->
   </include>
 
   <group ns="$(arg arm_id)">
@@ -117,11 +118,11 @@
   <node  pkg="rviz" type="rviz" output="screen" name="rviz" args="-d $(find cl_tsgrasp)/config/franka_sim_description_with_marker_and_pts.rviz" if="$(arg rviz)"/>
 
   <!-- throttle the point cloud input to the network -->
-  <node pkg="topic_tools" type="throttle" name="point_cloud_throttler" args="messages /camera/depth/points 200.0 /tsgrasp/points" />
+  <node pkg="topic_tools" type="throttle" name="point_cloud_throttler" args="messages /camera/depth/points 6.5 /tsgrasp/points" />
 
   <!-- Grasp network node -->
   <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
-  output="screen" launch-prefix="xterm -e"/>
+  output="screen" launch-prefix="xterm -hold -e"/>
 
   <!-- Node to select goal pose -->
   <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" />
