@@ -61,7 +61,7 @@ def main():
                 TerminalHoming(),
                 transitions={
                     'in_grasp_pose': 'CLOSE_GRIPPER',
-                    'not_in_grasp_pose': 'GO_TO_ORBITAL_POSE'
+                    'not_in_grasp_pose': 'GRASP_FAIL'
                 }
             )
             smach.StateMachine.add(
@@ -96,7 +96,7 @@ def main():
                 'preempted': 'FAIL'
             }
         )
-        smach.StateMachine.add('DELAY', Delay(1),
+        smach.StateMachine.add('DELAY', Delay(2),
             transitions={
                 'delayed':'SPAWN_NEW_ITEM'
             }
