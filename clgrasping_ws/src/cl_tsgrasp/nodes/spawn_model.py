@@ -43,7 +43,6 @@ class OBJObject:
     <pose>0 0 0 0 0 0</pose>
     <static>false</static>
     <self_collide>0</self_collide>
-    <kinematic>0</kinematic>
     <enable_wind>0</enable_wind>
     <link name="link">
     <inertial>
