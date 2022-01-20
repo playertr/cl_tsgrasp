@@ -20,6 +20,7 @@ GOAL_PUB_RATE   = 100.0
 STEP_SPEED      = 1.0
 STEP_SIZE       = STEP_SPEED / GOAL_PUB_RATE
 SUCCESS_RADIUS  = 0.02 # in SE(3) space -- dimensionless
+TIMEOUT         = 8
 
 # SpawnNewItem
 WORKSPACE_BOUNDS    = [[-0.1, -0.3], [0.1, -0.1]]
@@ -70,6 +71,8 @@ class SpawnNewItem(smach.State):
         
         self._cur_name = obj.name
         item_pose = self.random_pose_in_workspace()
+        item_pose.position.x -= obj.center_of_mass[0] # correct for strange obj origin
+        item_pose.position.y -= obj.center_of_mass[1]
         self.spawn_model(self._cur_name, obj.to_sdf(), "", item_pose, "world")
         print(obj.to_sdf())
         return 'spawned_new_item'
@@ -135,6 +138,7 @@ class TerminalHoming(smach.State):
         """
             Set an intermediate goal with a position that is close to the current EE position.
         """
+
         cp = ee_pose.pose.position
         curr_pos = np.array([cp.x, cp.y, cp.z])
         gp = final_goal_pose.pose.position
@@ -142,6 +146,7 @@ class TerminalHoming(smach.State):
 
         pos_diff = goal_pos - curr_pos
         if np.linalg.norm(pos_diff) < STEP_SIZE:
+
             rospy.loginfo("Setting goal pose.")
             intermediate_pos = goal_pos
         else:
@@ -162,10 +167,15 @@ class TerminalHoming(smach.State):
             rospy.loginfo('Waiting for final goal pose.')
             rospy.sleep(1)
 
+        start_time = rospy.Time.now()
+
         # update goal pose at fixed rate
         # note: an asynchronous callback may be better.
+        
         rate = rospy.Rate(GOAL_PUB_RATE)
         while se3_dist(self._ee_pose.pose, self._goal_pose.pose) > SUCCESS_RADIUS:
+            if rospy.Time.now() - start_time > rospy.Duration(TIMEOUT):
+                return 'not_in_grasp_pose'
             self._eq_pose_pub.publish(self._intermediate_goal(
                 self._ee_pose, self._goal_pose))
             rate.sleep()
