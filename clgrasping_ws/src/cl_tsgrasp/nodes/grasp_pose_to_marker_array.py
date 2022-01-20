@@ -26,8 +26,11 @@ def gripper_marker():
 def poses_cb(msg):
     
     viridis = cm.get_cmap('viridis', 12)
+
+    _range = max(msg.confs) - min(msg.confs)
+    _range = 1 if _range == 0 else _range
     cmap = lambda x: viridis(
-        (x - min(msg.confs))/(max(msg.confs) - min(msg.confs))
+        (x - min(msg.confs))/(_range)
     ) # normalize linearly
     
     marker_array = MarkerArray()
