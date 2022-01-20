@@ -83,7 +83,7 @@ class TimeIt:
 
 
 # https://stackoverflow.com/questions/59387182/construct-a-rotation-matrix-in-pytorch
-@torch.jit.script
+#@torch.jit.script
 def eul_to_rotm(roll: float, pitch: float, yaw: float):
     """Convert euler angles to rotation matrix."""
     roll = torch.tensor([roll])
@@ -112,7 +112,7 @@ def eul_to_rotm(roll: float, pitch: float, yaw: float):
     R = torch.mm(R, RX)
     return R
 
-@torch.jit.script
+#@torch.jit.script
 def inverse_homo(tf):
     """Compute inverse of homogeneous transformation matrix.
 
@@ -176,7 +176,7 @@ def transform_vec(x: torch.Tensor, tf: torch.Tensor) -> torch.Tensor:
 
     return (x_homog @ tf.transpose(-2, -1))[..., :3]
 
-@torch.jit.script
+#@torch.jit.script
 def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, gripper_depth: float=GRIPPER_DEPTH):
     """Calculate the SE(3) transforms corresponding to each predicted coord/approach/baseline/grasp_width grasp.
 
@@ -204,12 +204,12 @@ def build_6dof_grasps(contact_pts, baseline_dir, approach_dir, grasp_width, grip
     ], dim=-2)
     return pred_grasp_tfs
 
-@torch.jit.script
+#@torch.jit.script
 def discretize(positions: torch.Tensor, grid_size: float) -> torch.Tensor:
     """Truncate each position to an integer grid."""
     return (positions / grid_size).int()
 
-@torch.jit.script
+#@torch.jit.script
 def prepend_coordinate(matrix: torch.Tensor, coord: int):
         """Concatenate a constant column of value `coord` before a 2D matrix."""
         return torch.column_stack([
@@ -246,7 +246,7 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
         class_logits[idcs], baseline_dir[idcs], approach_dir[idcs], grasp_offset[idcs], points[-1]
     )
 
-@torch.jit.script
+#@torch.jit.script
 def in_bounds(world_pts, BOUNDS):
     """Remove any points that are out of bounds"""
     x, y, z = world_pts[..., 0], world_pts[..., 1], world_pts[..., 2]
@@ -275,7 +275,7 @@ def bound_point_cloud(pts, poses):
 
     return pts
 
-@torch.jit.script
+#@torch.jit.script
 def downsample_xyz(pts: List[torch.Tensor], pts_per_frame: int) -> List[torch.Tensor]:
     ## downsample point clouds proportion of points -- will that result in same sampling distribution?
     for i in range(len(pts)):
@@ -314,7 +314,12 @@ def identify_grasps(pts):
 
 def filter_grasps(grasps, confs):
 
-    vals, top_idcs = torch.topk(confs.squeeze(), k=3*TOP_K, sorted=True)
+    try: 
+        len(confs.squeeze())
+    except:
+        breakpoint()
+        
+    vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, len(confs.squeeze())), sorted=True)
     grasps = grasps[top_idcs]
     confs = confs[top_idcs]
 
@@ -324,13 +329,13 @@ def filter_grasps(grasps, confs):
     if grasps.shape[0] == 0:
         return None, None
 
-    # furthest point sampling by position
-    pos = grasps[:,:3,3]
-    _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
-    selected_idcs = selected_idcs.squeeze()
+    # # furthest point sampling by position
+    # pos = grasps[:,:3,3]
+    # _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
+    # selected_idcs = selected_idcs.squeeze()
 
-    grasps = grasps[selected_idcs]
-    confs = confs[selected_idcs]
+    # grasps = grasps[selected_idcs]
+    # confs = confs[selected_idcs]
 
     return grasps, confs
 
@@ -369,21 +374,25 @@ def find_grasps():
 
         # Start with pts, a list of Torch point clouds.
         # Remove points that are outside of the boundaries in the global frame.
-        with TimeIt('Bound Point CLoud'):
+        with TimeIt('Bound Point Cloud'):
             pts             = bound_point_cloud(pts, poses)
+            if pts is None: return
 
         # Downsample the points with uniform probability.
         with TimeIt('Downsample Points'):
             pts             = downsample_xyz(pts, PTS_PER_FRAME)
+            if pts is None: return
 
         # Transform the points into the frame of the last camera perspective.
         with TimeIt('Transform to Camera Frame'):
             pts             = transform_to_camera_frame(pts, poses)
+            if pts is None or len(pts[-1]) == 0: return
 
         # Run the NN to identify grasp poses and confidences.
         with TimeIt('Find Grasps'):
             grasps, confs   = identify_grasps(pts)
             all_confs       = confs.clone() # keep the pointwise confs for plotting later
+            if pts is None or len(pts[-1]) == 0: return
 
         # Filter the grasps by thresholding and furthest-point sampling.
         with TimeIt('Filter Grasps'):
