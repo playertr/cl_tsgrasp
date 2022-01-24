@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda_depth_cam">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda">
 
   <!-- include Panda arm -->
-  <xacro:include filename="$(find franka_description)/robots/panda_arm.urdf.xacro"/>
+  <xacro:include filename="$(find panda_description)/urdf/panda_xacro/panda_arm_hand.urdf.xacro"/>
   
   <!-- include depth camera -->
   <xacro:include filename="$(find cl_tsgrasp)/urdf/depth_cam.urdf.xacro"/>

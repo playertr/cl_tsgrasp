@@ -1,4 +1,5 @@
 #! /home/tim/anaconda3/envs/tsgrasp/bin/python
+
 # Script to spawn models in gazebo given an OBJ path and inertial properties
 # from dataclasses import dataclass
 import h5py

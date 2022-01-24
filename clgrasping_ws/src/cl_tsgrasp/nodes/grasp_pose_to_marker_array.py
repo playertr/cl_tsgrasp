@@ -13,7 +13,7 @@ def gripper_marker():
     marker = Marker()
     marker.type = marker.MESH_RESOURCE
     marker.action = marker.MODIFY
-    marker.mesh_resource = "package://cl_tsgrasp/urdf/gripper_pads_at_origin.stl"
+    marker.mesh_resource = "package://cl_tsgrasp/urdf/gripper.stl"
     marker.scale.x = 1.0
     marker.scale.y = 1.0
     marker.scale.z = 1.0

@@ -7,9 +7,8 @@ source devel/setup.bash
 # 	controller:=cartesian_impedance_example_controller \
 # 	rviz:=true
 
-roslaunch cl_tsgrasp sim.launch x:=-0.5 y:=-0.075 \
+roslaunch cl_tsgrasp sim_new.launch x:=-0.5 y:=-0.075 \
 	world:=$(rospack find cl_tsgrasp)/worlds/no_stone.sdf \
-	controller:=cartesian_impedance_example_controller \
 	rviz:=true
 
 	

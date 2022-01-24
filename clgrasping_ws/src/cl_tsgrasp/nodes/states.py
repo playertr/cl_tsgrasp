@@ -1,15 +1,13 @@
 import rospy
-from smach_ros import SimpleActionState
 import smach
-from franka_gripper.msg import MoveAction, MoveGoal, GraspAction, GraspGoal
 from geometry_msgs.msg import PoseStamped, Pose, Vector3, Quaternion, Point
-import cl_tsgrasp.msg
 import numpy as np
 from rospy.numpy_msg import numpy_msg
 from utils import se3_dist
 from spawn_model import ObjectDataset
 from gazebo_msgs.srv import DeleteModel, SpawnModel
 import tf.transformations
+from motion import Mover
 
 ## constants
 # GoToOrbitalPose
@@ -90,9 +88,9 @@ class Delay(smach.State):
 class GoToOrbitalPose(smach.State):
     _orbital_pose = None 
 
-    def __init__(self, motion_client):
+    def __init__(self, mover: Mover):
         smach.State.__init__(self, outcomes=['in_orbital_pose', 'not_in_orbital_pose'])
-        self._motion_client = motion_client
+        self.mover = mover
         orbital_pose_sub = rospy.Subscriber(
             name='tsgrasp/orbital_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
@@ -102,15 +100,8 @@ class GoToOrbitalPose(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state GO_TO_ORBITAL_POSE')
-
-        while self._orbital_pose is None:
-            rospy.loginfo('Waiting for orbital pose.')
-            rospy.sleep(1)
-
-        goal = cl_tsgrasp.msg.MotionGoal(goal_pose=self._orbital_pose)
-        self._motion_client.send_goal(goal)
-        finished = self._motion_client.wait_for_result(rospy.Duration.from_sec(5.0))
-        return 'in_orbital_pose' if finished else 'not_in_orbital_pose'
+        success = self.mover.go_ee_pose(self._orbital_pose)
+        return 'in_orbital_pose' if success else 'not_in_orbital_pose'
 
 ## Terminal homing state
 class TerminalHoming(smach.State):
@@ -183,38 +174,46 @@ class TerminalHoming(smach.State):
         return 'in_grasp_pose'
 
 ## Open Jaws State
-open_goal = MoveGoal(width=0.08, speed=0.1)
-OpenJaws = SimpleActionState(
-    '/panda/franka_gripper/move',
-    MoveAction,
-    goal=open_goal
-)
+class OpenJaws(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['jaws_open', 'jaws_not_open'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state OPEN_JAWS')
+        success = self.mover.go_gripper(np.array([0.03, 0.03]))
+        return 'jaws_open' if success else 'jaws_not_open'
 
 ## Close Jaws State
-close_goal = GraspGoal(
-    width=0.00,
-    speed=0.05, 
-    force=10.0
-)
-close_goal.epsilon.inner=0.04
-close_goal.epsilon.outer=0.04
-CloseJaws = SimpleActionState(
-    '/panda/franka_gripper/grasp',
-    GraspAction,
-    goal=close_goal
-)
+class CloseJaws(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['jaws_closed', 'jaws_not_closed'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state CLOSE_JAWS')
+        success = self.mover.go_gripper(np.array([0.0, 0.0]))
+        return 'jaws_closed' if success else 'jaws_not_closed'
 
 ## Reset Position State
-q = tf.transformations.quaternion_from_euler(np.pi, -np.pi/3, 0)
-reset_pose = PoseStamped(
-    pose=Pose(
-        position=Vector3(z=0.7),
-        orientation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
-    )
-)
-reset_pos_goal = cl_tsgrasp.msg.MotionGoal(goal_pose=reset_pose)
-ResetPos = SimpleActionState(
-    '/motion_server',
-    cl_tsgrasp.msg.MotionAction,
-    goal=reset_pos_goal
-)
+class ResetPos(smach.State):
+    STARTING_POS = np.array([
+        0.0,
+        -0.03,
+        0.067,
+        -1.568,
+        -0.46,
+        1.526,
+        0.0
+    ])
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state RESET_POSITION')
+        success = self.mover.go_joints(self.STARTING_POS)
+        return 'position_reset' if success else 'position_not_reset'

@@ -1,13 +1,12 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 # Execute finite state machine for grasping.
 
-from ast import Del
 import rospy
 import smach_ros
 import smach
 import actionlib
 import cl_tsgrasp.msg
-from franka_gripper.msg import MoveAction, GraspAction
+from motion import Mover
 
 # main
 def main():
@@ -18,16 +17,12 @@ def main():
     rospy.loginfo("Waiting for services.")
     rospy.wait_for_service("gazebo/delete_model")
     rospy.wait_for_service("gazebo/spawn_sdf_model")
-    
-    actionlib.SimpleActionClient('/panda/franka_gripper/move', MoveAction).wait_for_server()
-    actionlib.SimpleActionClient('/panda/franka_gripper/grasp', GraspAction).wait_for_server()
 
     # Start end-effector motion client
-    motion_client = actionlib.SimpleActionClient('/motion_server', cl_tsgrasp.msg.MotionAction)
-    motion_client.wait_for_server()
+    mover = Mover()
 
     # import states AFTER this node and the services are initialized
-    from states import OpenJaws, GoToOrbitalPose, TerminalHoming, CloseJaws, ResetPos, SpawnNewItem, Delay
+    from states import  GoToOrbitalPose, TerminalHoming, SpawnNewItem, Delay, ResetPos, OpenJaws, CloseJaws
 
     # Create a SMACH state machine
     sm = smach.StateMachine(outcomes=['SUCCESS', 'FAIL'])
@@ -41,16 +36,15 @@ def main():
             # Add states to the container
             smach.StateMachine.add(
                 'OPEN_GRIPPER',
-                OpenJaws,
+                OpenJaws(mover),
                 transitions={
-                    'succeeded': 'GO_TO_ORBITAL_POSE',
-                    'aborted': 'GRASP_FAIL',
-                    'preempted': 'OPEN_GRIPPER'
+                    'jaws_open': 'GO_TO_ORBITAL_POSE',
+                    'jaws_not_open': 'GRASP_FAIL'
                 }
             )
             smach.StateMachine.add(
                 'GO_TO_ORBITAL_POSE',
-                GoToOrbitalPose(motion_client),
+                GoToOrbitalPose(mover),
                 transitions={
                     'in_orbital_pose': 'TERMINAL_HOMING',
                     'not_in_orbital_pose': 'GRASP_FAIL'
@@ -60,51 +54,49 @@ def main():
                 'TERMINAL_HOMING',
                 TerminalHoming(),
                 transitions={
-                    'in_grasp_pose': 'CLOSE_GRIPPER',
+                    'in_grasp_pose': 'CLOSE_JAWS',
                     'not_in_grasp_pose': 'GRASP_FAIL'
                 }
             )
             smach.StateMachine.add(
-                'CLOSE_GRIPPER',
-                CloseJaws,
+                'CLOSE_JAWS',
+                CloseJaws(mover),
                 transitions={
-                    'succeeded': 'RESET_POS',
-                    'aborted': 'GRASP_FAIL',
-                    'preempted': 'OPEN_GRIPPER'
+                    'jaws_closed': 'RESET_POS',
+                    'jaws_not_closed': 'GRASP_FAIL'
                 }
             )
             smach.StateMachine.add(
                 'RESET_POS',
-                ResetPos,
+                ResetPos(mover),
                 transitions={
-                    'succeeded': 'GRASP_SUCCESS',
-                    'aborted': 'GRASP_FAIL',
-                    'preempted': 'GO_TO_ORBITAL_POSE'
+                    'position_reset': 'GRASP_SUCCESS',
+                    'position_not_reset': 'GRASP_FAIL'
                 }
             )
         
-        
+        smach.StateMachine.add('RESET_INITIAL_POS', ResetPos(mover),
+            transitions={
+                'position_reset': 'SPAWN_NEW_ITEM',
+                'position_not_reset': 'RESET_INITIAL_POS'
+            }
+        )
+
         smach.StateMachine.add('SPAWN_NEW_ITEM', SpawnNewItem(),
             transitions={
                 'spawned_new_item':'DELAY'
             }
         )
-        smach.StateMachine.add('RESET_INITIAL_POS', ResetPos,
+        
+        smach.StateMachine.add('DELAY', Delay(3),
             transitions={
-                'succeeded': 'SPAWN_NEW_ITEM',
-                'aborted': 'RESET_INITIAL_POS',
-                'preempted': 'FAIL'
-            }
-        )
-        smach.StateMachine.add('DELAY', Delay(2),
-            transitions={
-                'delayed':'SPAWN_NEW_ITEM'
+                'delayed':'GRASP'
             }
         )
         smach.StateMachine.add('GRASP', grasp_sm, 
             transitions={
-                'GRASP_SUCCESS':'RESET_INITIAL_POS',
-                'GRASP_FAIL':'RESET_INITIAL_POS'
+                'GRASP_SUCCESS':'SPAWN_NEW_ITEM',
+                'GRASP_FAIL':'SPAWN_NEW_ITEM'
             }
         )
 

@@ -1,11 +1,8 @@
-#! /usr/bin/env python
-# Read in the current end effector goal pose from a FrankaState message
-# and publish it as a normal PoseStamped
+#! /usr/bin/env python3
+
 import rospy
-from std_msgs.msg import Header
-from franka_msgs.msg import FrankaState
 from utils import TransformFrames
-from geometry_msgs.msg import PoseStamped, Pose, Vector3
+from geometry_msgs.msg import PoseStamped, Pose
 
 
 rospy.init_node('publish_cam_pose')
@@ -25,7 +22,7 @@ def publish_cam_pose():
     ee_pose_pub.publish(cam_pose)
 
 rospy.loginfo('Ready to publish camera pose.')
-r = rospy.Rate(100)
+r = rospy.Rate(50)
 while not rospy.is_shutdown():
     publish_cam_pose()
     r.sleep()

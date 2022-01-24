@@ -31,7 +31,7 @@ import MinkowskiEngine as ME
 from pytorch3d.ops import sample_farthest_points
 
 ## global constants
-QUEUE_LEN       = 8
+QUEUE_LEN       = 1
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0.5
@@ -307,7 +307,7 @@ def identify_grasps(pts):
 
     # only retain the information from the latest (-1) frame
     grasps = build_6dof_grasps(positions, baseline_dir, approach_dir, grasp_offset)
-    grasps = transform_to_eq_pose(grasps)
+    # grasps = transform_to_eq_pose(grasps)
     confs = torch.sigmoid(class_logits)
 
     return grasps, confs
@@ -460,8 +460,8 @@ def depth_callback(depth_msg):
         queue.append((depth_msg, ee_tf))
 
 # subscribe to throttled point cloud
-# depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
-depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
+depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
+# depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
 ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
 while not rospy.is_shutdown():
     print("##########################################################")
