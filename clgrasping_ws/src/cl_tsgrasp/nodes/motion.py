@@ -6,6 +6,11 @@ import geometry_msgs.msg
 from moveit_commander.conversions import pose_to_list
 import numpy as np
 
+import rospy
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+        
+
+
 def all_close(goal, actual, tolerance):
     """
     Convenience method for testing if a list of values are within a tolerance of
@@ -37,7 +42,8 @@ class Mover:
     def __init__(self):
         moveit_commander.roscpp_initialize([])
         self.arm = moveit_commander.MoveGroupCommander("panda_arm")
-        self.gripper = moveit_commander.MoveGroupCommander("panda_hand")
+                
+        self.gripper_pub = rospy.Publisher('/panda_hand_controller/command', data_class=JointTrajectory, queue_size=1)
 
     def go_joints(self, joints: np.ndarray, wait: bool = True):
         """Move robot to the given 7-element joint configuration.
@@ -50,6 +56,17 @@ class Mover:
         self.arm.stop()
         return plan
 
+    # def go_gripper(self, pos: np.ndarray, wait: bool = True):
+    #     """Move the gripper fingers to the two given positions.
+
+    #     Args:
+    #         pos (np.ndarray): gripper positions, in meters from center
+    #         wait (bool): whether to block until finished
+    #     """
+    #     plan = self.gripper.go(pos, wait=wait)
+    #     self.gripper.stop()
+    #     return plan
+
     def go_gripper(self, pos: np.ndarray, wait: bool = True):
         """Move the gripper fingers to the two given positions.
 
@@ -57,9 +74,22 @@ class Mover:
             pos (np.ndarray): gripper positions, in meters from center
             wait (bool): whether to block until finished
         """
-        plan = self.gripper.go(pos, wait=wait)
-        self.gripper.stop()
-        return plan
+        # publisher = rospy.Publisher('/panda_hand_controller/command', data_class=Float64MultiArray, queue_size=1)
+
+        # publisher.publish(Float64MultiArray(data=pos))
+
+        jt = JointTrajectory()
+        jt.joint_names = 'panda_finger_joint1', 'panda_finger_joint2'
+        jt.header.stamp = rospy.Time.now()
+
+        jtp = JointTrajectoryPoint()
+        jtp.positions = pos
+        jtp.time_from_start = rospy.Duration(secs=3)
+
+        jt.points.append(jtp)
+
+        self.gripper_pub.publish(jt)
+        return True
 
     def go_ee_pose(self, pose: geometry_msgs.msg.Pose, wait: bool = True):
         """Move the end effector to the given pose.
