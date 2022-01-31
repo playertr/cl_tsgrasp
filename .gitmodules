@@ -4,3 +4,6 @@
 [submodule "clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp"]
 	path = clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp
 	url = git@github.com:playertr/tsgrasp.git
+[submodule "clgrasping_ws/src/panda_gazebo_sim"]
+	path = clgrasping_ws/src/panda_gazebo_sim
+	url = git@github.com:playertr/panda_gazebo_sim.git
