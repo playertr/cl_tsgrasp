@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 # Execute finite state machine for grasping.
 
+from clgrasping_ws.src.cl_tsgrasp.nodes.states import GoToFinalPose
 import rospy
 import smach_ros
 import smach
@@ -35,7 +36,7 @@ def main():
         with grasp_sm:
             # Add states to the container
             smach.StateMachine.add(
-                'OPEN_GRIPPER',
+                'OPEN_JAWS',
                 OpenJaws(mover),
                 transitions={
                     'jaws_open': 'GO_TO_ORBITAL_POSE',
@@ -52,7 +53,51 @@ def main():
             )
             smach.StateMachine.add(
                 'TERMINAL_HOMING',
-                TerminalHoming(),
+                TerminalHoming(mover),
+                transitions={
+                    'in_grasp_pose': 'CLOSE_JAWS',
+                    'not_in_grasp_pose': 'GRASP_FAIL'
+                }
+            )
+            smach.StateMachine.add(
+                'CLOSE_JAWS',
+                CloseJaws(mover),
+                transitions={
+                    'jaws_closed': 'RESET_POS',
+                    'jaws_not_closed': 'GRASP_FAIL'
+                }
+            )
+            smach.StateMachine.add(
+                'RESET_POS',
+                ResetPos(mover),
+                transitions={
+                    'position_reset': 'GRASP_SUCCESS',
+                    'position_not_reset': 'GRASP_FAIL'
+                }
+            )
+        
+        open_loop_grasp_sm = smach.StateMachine(outcomes=['GRASP_SUCCESS', 'GRASP_FAIL'])
+        with open_loop_grasp_sm:
+            # Add states to the container
+            smach.StateMachine.add(
+                'OPEN_JAWS',
+                OpenJaws(mover),
+                transitions={
+                    'jaws_open': 'GO_TO_ORBITAL_POSE',
+                    'jaws_not_open': 'GRASP_FAIL'
+                }
+            )
+            smach.StateMachine.add(
+                'GO_TO_ORBITAL_POSE',
+                GoToOrbitalPose(mover),
+                transitions={
+                    'in_orbital_pose': 'GO_TO_FINAL_POSE',
+                    'not_in_orbital_pose': 'GRASP_FAIL'
+                }
+            )
+            smach.StateMachine.add(
+                'GO_TO_FINAL_POSE',
+                GoToFinalPose(mover),
                 transitions={
                     'in_grasp_pose': 'CLOSE_JAWS',
                     'not_in_grasp_pose': 'GRASP_FAIL'
