@@ -3,7 +3,6 @@
 
 import sys
 sys.path.append("/home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp")
-from tsgrasp.net.lit_tsgraspnet import LitTSGraspNet
 
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -11,8 +10,8 @@ import torch
 
 cfg_str = """
 training:
-  gpus: 4
-  batch_size: 3
+  gpus: 1
+  batch_size: 10
   max_epochs: 100
   optimizer:
     learning_rate: 0.00025
@@ -22,8 +21,9 @@ training:
   use_wandb: false
   wandb:
     project: TSGrasp
-    experiment: tsgrasp_1_15
-    notes: Jan 15 run with all-frame loss, object frame, and object-category test/train.
+    experiment: tsgrasp_scene
+    notes: First run attempting table scene data.
+  save_animations: false
 model:
   _target_: tsgrasp.net.lit_tsgraspnet.LitTSGraspNet
   model_cfg:
@@ -40,8 +40,28 @@ model:
     conv1_kernel_size: 3
     dilations:
     - 1 1 1 1
+data:
+  _target_: tsgrasp.data.lit_scenerenderer_dm.LitTrajectoryDataset
+  data_cfg:
+    num_workers: 0
+    data_proportion_per_epoch: 1
+    dataroot: /home/tim/Research/contact_graspnet/acronym
+    frames_per_traj: 4
+    points_per_frame: 45000
+    min_pitch: 0.0
+    max_pitch: 1.222
+    scene_contacts_path: ${data.data_cfg.dataroot}/scene_contacts
+    pc_augm:
+      clip: 0.005
+      occlusion_dropout_rate: 0.0
+      occlusion_nclusters: 0
+      sigma: 0.0
+    depth_augm:
+      clip: 0.005
+      gaussian_kernel: 0
+      sigma: 0.001
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_1_15/model.ckpt
+ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_scene_4_frames/model.ckpt
 """
 
 def load_model():
