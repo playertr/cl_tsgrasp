@@ -9,6 +9,6 @@ source devel/setup.bash
 
 roslaunch cl_tsgrasp sim_new.launch x:=-0.5 y:=-0.075 \
 	world:=$(rospack find cl_tsgrasp)/worlds/no_stone.sdf \
-	rviz:=true
+	rviz:=true use_controller:=true
 
 	
