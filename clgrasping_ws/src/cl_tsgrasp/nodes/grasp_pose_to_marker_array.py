@@ -13,7 +13,7 @@ def gripper_marker():
     marker = Marker()
     marker.type = marker.MESH_RESOURCE
     marker.action = marker.MODIFY
-    marker.mesh_resource = "package://cl_tsgrasp/urdf/gripper.stl"
+    marker.mesh_resource = "package://cl_tsgrasp/urdf/gripper_yawed.stl"
     marker.scale.x = 1.0
     marker.scale.y = 1.0
     marker.scale.z = 1.0
@@ -34,7 +34,7 @@ def poses_cb(msg):
     ) # normalize linearly
     
     marker_array = MarkerArray()
-    for i, pose in enumerate(msg.poses[:50]):
+    for i, pose in enumerate(msg.poses[:500]):
         marker = gripper_marker()
         marker.id = i
         marker.color.a = 0.5
