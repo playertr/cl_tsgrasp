@@ -17,7 +17,7 @@ class TransformFrames():
             trans = self.tfBuffer.lookup_transform(target_frame, source_frame, rospy.Time(0), rospy.Duration(0.2) )
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
             rospy.logerr('Cannot find transformation.')
-            raise Exception('Cannot find transformation.')
+            raise e
         return trans     # Type: TransformStamped
 
     def pose_transform(self, pose_s, target_frame='odom'):
