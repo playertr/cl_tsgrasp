@@ -21,27 +21,26 @@ import ros_numpy
 import numpy as np
 from collections import deque
 import torch
-from torch import sin, cos
 from threading import Lock
-from scipy.spatial.transform import Rotation as R
 import copy
 from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
 import math
 import MinkowskiEngine as ME
 from pytorch3d.ops import sample_farthest_points
+# torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
 
 ## global constants
-QUEUE_LEN       = 8
+QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
-CONF_THRESHOLD  = 0.5
-TOP_K           = 100
+CONF_THRESHOLD  = 0 #0.5
+TOP_K           = 400
 # BOUNDS          = torch.Tensor([[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]]) # (xyz_lower, xyz_upper)
 
 BOUNDS          = torch.Tensor([[-0.2, -0.3, 0.3], [0.3, 0.3, 0.65]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
-TF_X, TF_Y, TF_Z = 0, 0, 0.1034
+TF_X, TF_Y, TF_Z = 0, 0, 0
 
 ## load Pytorch Lightning network
 device = torch.device('cuda')
@@ -76,7 +75,7 @@ class TimeIt:
         self.t0 = time.time()
 
     def __exit__(self, t, value, traceback):
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         self.t1 = time.time()
         if self.print_output:
             print('%s: %s' % (self.s, self.t1 - self.t0))
@@ -217,6 +216,14 @@ def prepend_coordinate(matrix: torch.Tensor, coord: int):
             matrix
         ])
 
+def unweighted_sum(coords: torch.Tensor):
+    """Create a feature vector from a coordinate array, so each 
+    row's feature is the number of rows that share that coordinate."""
+    
+    unique_coords, idcs, counts = coords.unique(dim=0, return_counts=True, return_inverse=True)
+    features = counts[idcs]
+    return features.reshape(-1, 1).to(torch.float32)
+
 def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> torch.Tensor:
     """Run a sparse convolutional network on a list of consecutive point clouds, and return the grasp predictions for the last point cloud. Each point cloud may have different numbers of points."""
 
@@ -229,13 +236,15 @@ def infer_grasps(tsgraspnet, points: List[torch.Tensor], grid_size: float) -> to
     coords = prepend_coordinate(coords, 0) # add dummy batch dimension
 
     ## Discretize coordinates to integer grid
-    coords = discretize(coords, grid_size)
+    coords = discretize(coords, grid_size).contiguous()
+    feats = unweighted_sum(coords)
 
     ## Construct a Minkoswki sparse tensor and run forward inference
     stensor = ME.SparseTensor(
         coordinates = coords,
-        features = torch.ones((len(coords), 1), device=coords.device)
+        features = feats
     )
+    print(coords.shape)
 
     with TimeIt("   tsgraspnet.model.forward"):
         class_logits, baseline_dir, approach_dir, grasp_offset = tsgraspnet.model.forward(stensor)
@@ -318,21 +327,27 @@ def filter_grasps(grasps, confs):
         len(confs.squeeze())
     except:
         breakpoint()
-        
+
+    # confidence thresholding
+    grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
+    confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
+
+    if grasps.shape[0] == 0 or confs.shape[0] == 0:
+        return None, None
+
+    # top-k selection
     vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, len(confs.squeeze())), sorted=True)
     grasps = grasps[top_idcs]
     confs = confs[top_idcs]
 
-    # grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
-    # confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
-
     if grasps.shape[0] == 0:
         return None, None
 
+    # furthest point sampling
     # # furthest point sampling by position
-    # pos = grasps[:,:3,3]
-    # _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
-    # selected_idcs = selected_idcs.squeeze()
+    pos = grasps[:,:3,3]
+    _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
+    selected_idcs = selected_idcs.squeeze()
 
     # grasps = grasps[selected_idcs]
     # confs = confs[selected_idcs]
@@ -362,7 +377,7 @@ def find_grasps():
                 # device = "cpu"
                 with TimeIt("   pts_to_gpu: "):
                     pts = [torch.from_numpy(pt.astype(np.float32)).to(device) for pt in pts]
-                poses = torch.Tensor(np.stack(poses)).to(device)
+                poses = torch.Tensor(np.stack(poses)).to(device, non_blocking=True)
             except ValueError as e:
                 print(e)
                 print("Is this error because there are fewer than 300x300 points?")

@@ -1,26 +1,24 @@
 import rospy
-from smach_ros import SimpleActionState
 import smach
-from franka_gripper.msg import MoveAction, MoveGoal, GraspAction, GraspGoal
-from geometry_msgs.msg import PoseStamped, Pose, Vector3, Quaternion, Point
-import cl_tsgrasp.msg
+from geometry_msgs.msg import PoseStamped, Pose, Vector3, Quaternion, Point, TwistStamped
 import numpy as np
 from rospy.numpy_msg import numpy_msg
 from utils import se3_dist
 from spawn_model import ObjectDataset
 from gazebo_msgs.srv import DeleteModel, SpawnModel
 import tf.transformations
+from motion import Mover
 
 ## constants
 # GoToOrbitalPose
 ORBIT_RADIUS   = 0.1 # distance to initially orbit object before terminal homing
 
 # TerminalHoming
-GOAL_PUB_RATE   = 100.0
+GOAL_PUB_RATE   = 30
 STEP_SPEED      = 1.0
-STEP_SIZE       = STEP_SPEED / GOAL_PUB_RATE
 SUCCESS_RADIUS  = 0.02 # in SE(3) space -- dimensionless
-TIMEOUT         = 8
+TIMEOUT         = 80
+LAMBDA          = 0.1*np.array([1, 1, 1, 1, 1, 1])
 
 # SpawnNewItem
 WORKSPACE_BOUNDS    = [[-0.1, -0.3], [0.1, -0.1]]
@@ -38,7 +36,7 @@ class SpawnNewItem(smach.State):
 
         self.obj_ds = ObjectDataset(
             dataset_dir="/home/tim/Research/tsgrasp/data/dataset",
-            split="test"
+            split="train"
         )
         self.delete_model = rospy.ServiceProxy("gazebo/delete_model", DeleteModel)
         self.spawn_model = rospy.ServiceProxy("gazebo/spawn_sdf_model", SpawnModel)
@@ -90,9 +88,9 @@ class Delay(smach.State):
 class GoToOrbitalPose(smach.State):
     _orbital_pose = None 
 
-    def __init__(self, motion_client):
+    def __init__(self, mover: Mover):
         smach.State.__init__(self, outcomes=['in_orbital_pose', 'not_in_orbital_pose'])
-        self._motion_client = motion_client
+        self.mover = mover
         orbital_pose_sub = rospy.Subscriber(
             name='tsgrasp/orbital_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
@@ -102,15 +100,35 @@ class GoToOrbitalPose(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state GO_TO_ORBITAL_POSE')
+        if self._orbital_pose is None:
+            rospy.loginfo('Orbital pose has not been initialized.')
+            return 'not_in_orbital_pose'
 
-        while self._orbital_pose is None:
-            rospy.loginfo('Waiting for orbital pose.')
-            rospy.sleep(1)
+        success = self.mover.go_ee_pose(self._orbital_pose)
+        return 'in_orbital_pose' if success else 'not_in_orbital_pose'
 
-        goal = cl_tsgrasp.msg.MotionGoal(goal_pose=self._orbital_pose)
-        self._motion_client.send_goal(goal)
-        finished = self._motion_client.wait_for_result(rospy.Duration.from_sec(5.0))
-        return 'in_orbital_pose' if finished else 'not_in_orbital_pose'
+# GoToFinalPose state
+class GoToFinalPose(smach.State):
+    _final_pose = None 
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'])
+        self.mover = mover
+        orbital_pose_sub = rospy.Subscriber(
+            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+
+    def _goal_pose_cb(self, msg):
+        self._final_pose = msg
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state GO_TO_FINAL_POSE')
+        if self._final_pose is None:
+            rospy.loginfo('Final goal pose has not been initialized.')
+            return 'not_in_grasp_pose'
+
+        success = self.mover.go_ee_pose(self._final_pose)
+        return 'in_grasp_pose' if success else 'not_in_grasp_pose'
 
 ## Terminal homing state
 class TerminalHoming(smach.State):
@@ -119,14 +137,16 @@ class TerminalHoming(smach.State):
 
     def __init__(self):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'])
+
         goal_pose_sub = rospy.Subscriber(
             name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
         ee_pose_sub = rospy.Subscriber(
             name='tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
-        self._eq_pose_pub = rospy.Publisher(name='/tsgrasp/goal_pose', 
-            data_class=numpy_msg(PoseStamped), queue_size=1)
+        self._servo_twist_pub = rospy.Publisher(
+            name='/servo_server/delta_twist_cmds', 
+            data_class=numpy_msg(TwistStamped), queue_size=1)
 
     def _ee_pose_cb(self, msg):
         self._ee_pose = msg
@@ -134,29 +154,34 @@ class TerminalHoming(smach.State):
     def _goal_pose_cb(self, msg):
         self._goal_pose = msg
 
-    def _intermediate_goal(self, ee_pose, final_goal_pose):
+    @staticmethod
+    def _posestamped_to_arr(ps):
+        pos, quat = ps.position, ps.orientation
+        rpy = tf.transformations.euler_from_quaternion(
+            [quat.x, quat.y, quat.z, quat.w]
+        )
+        return np.array([pos.x, pos.y, pos.z, *rpy])
+
+    def _compute_twist(self, ee_pose: PoseStamped, final_goal_pose: PoseStamped) -> TwistStamped:
         """
-            Set an intermediate goal with a position that is close to the current EE position.
+            Generate visual servoing Twist command using proportional control over X,Y,Z,R,P,Y .
         """
+        p1 = self._posestamped_to_arr(ee_pose.pose)
+        p2 = self._posestamped_to_arr(final_goal_pose.pose)
 
-        cp = ee_pose.pose.position
-        curr_pos = np.array([cp.x, cp.y, cp.z])
-        gp = final_goal_pose.pose.position
-        goal_pos = np.array([gp.x, gp.y, gp.z])
+        efforts = LAMBDA * (p2 - p1)
 
-        pos_diff = goal_pos - curr_pos
-        if np.linalg.norm(pos_diff) < STEP_SIZE:
+        twist = TwistStamped()
+        twist.header = ee_pose.header
+        twist.header.stamp = rospy.Time.now() # make current so servo command doesn't time out
+        twist.twist.linear = Vector3(*efforts[:3])
+        twist.twist.angular = Vector3(*efforts[3:])
 
-            rospy.loginfo("Setting goal pose.")
-            intermediate_pos = goal_pos
-        else:
-            rospy.loginfo("Setting intermediate pose.")
-            intermediate_pos = curr_pos + STEP_SIZE * pos_diff / np.linalg.norm(pos_diff)
-
-        intermediate_pose = Pose(
-            position=Vector3(*intermediate_pos), 
-            orientation=final_goal_pose.pose.orientation)
-        return PoseStamped(header=final_goal_pose.header, pose=intermediate_pose)
+        rospy.loginfo(f"Final pose \n{final_goal_pose.pose.position}")        
+        rospy.loginfo(f"ee pose: \n{ee_pose.pose.position}")
+        rospy.loginfo(f"Issuing twist: \n{twist.twist.linear}")
+        
+        return twist
 
     def execute(self, userdata):
         rospy.loginfo('Executing state TERMINAL_HOMING')
@@ -176,45 +201,63 @@ class TerminalHoming(smach.State):
         while se3_dist(self._ee_pose.pose, self._goal_pose.pose) > SUCCESS_RADIUS:
             if rospy.Time.now() - start_time > rospy.Duration(TIMEOUT):
                 return 'not_in_grasp_pose'
-            self._eq_pose_pub.publish(self._intermediate_goal(
-                self._ee_pose, self._goal_pose))
+
+            self._servo_twist_pub.publish(
+                self._compute_twist(self._ee_pose, self._goal_pose)
+            )
             rate.sleep()
 
         return 'in_grasp_pose'
 
+class ServoToFinalPose(TerminalHoming):
+    """Just like TerminalHoming, but the target never moves after being set."""
+
+    def _goal_pose_cb(self, msg):
+        if self._goal_pose is None:
+            self._goal_pose = msg
+
 ## Open Jaws State
-open_goal = MoveGoal(width=0.08, speed=0.1)
-OpenJaws = SimpleActionState(
-    '/panda/franka_gripper/move',
-    MoveAction,
-    goal=open_goal
-)
+class OpenJaws(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['jaws_open', 'jaws_not_open'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state OPEN_JAWS')
+        success = self.mover.go_gripper(np.array([0.04, 0.04]))
+        return 'jaws_open' if success else 'jaws_not_open'
 
 ## Close Jaws State
-close_goal = GraspGoal(
-    width=0.00,
-    speed=0.05, 
-    force=10.0
-)
-close_goal.epsilon.inner=0.04
-close_goal.epsilon.outer=0.04
-CloseJaws = SimpleActionState(
-    '/panda/franka_gripper/grasp',
-    GraspAction,
-    goal=close_goal
-)
+class CloseJaws(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['jaws_closed', 'jaws_not_closed'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state CLOSE_JAWS')
+        success = self.mover.go_gripper(np.array([0.0, 0.0]))
+        return 'jaws_closed' if success else 'jaws_not_closed'
 
 ## Reset Position State
-q = tf.transformations.quaternion_from_euler(np.pi, -np.pi/3, 0)
-reset_pose = PoseStamped(
-    pose=Pose(
-        position=Vector3(z=0.7),
-        orientation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
-    )
-)
-reset_pos_goal = cl_tsgrasp.msg.MotionGoal(goal_pose=reset_pose)
-ResetPos = SimpleActionState(
-    '/motion_server',
-    cl_tsgrasp.msg.MotionAction,
-    goal=reset_pos_goal
-)
+class ResetPos(smach.State):
+
+    STARTING_POS = np.array([
+        0.0,
+        -0.9,
+        0.0,
+        -1.65,
+        0.0,
+        1.40,
+        0.0
+    ])
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state RESET_POSITION')
+        success = self.mover.go_joints(self.STARTING_POS)
+        return 'position_reset' if success else 'position_not_reset'

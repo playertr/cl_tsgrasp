@@ -1,13 +1,11 @@
-#! /home/tim/anaconda3/envs/tsgrasp/bin/python
-# shebang is for the Python3 environment with the network dependencies
+To run this model, first set the tsgrasp commit via
 
-import sys
-sys.path.append("/home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp")
+```
+git checkout 22f0f9173917c35e713506fea1132c8ca10ef7ef
+```
 
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
-import torch
-
+and use
+```
 cfg_str = """
 training:
   gpus: 1
@@ -63,9 +61,6 @@ data:
 
 ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_scene_4_frames/model.ckpt
 """
+```
 
-def load_model():
-    cfg = OmegaConf.create(cfg_str)
-    pl_model = instantiate(cfg.model, training_cfg=cfg.training)
-    pl_model.load_state_dict(torch.load(cfg.ckpt_path)['state_dict'])
-    return pl_model
+artifact playertr/TSGrasp/model-3r7g1t3m:v99

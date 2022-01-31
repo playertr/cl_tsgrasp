@@ -1,4 +1,5 @@
 #! /home/tim/anaconda3/envs/tsgrasp/bin/python
+
 # Script to spawn models in gazebo given an OBJ path and inertial properties
 # from dataclasses import dataclass
 import h5py
@@ -17,9 +18,15 @@ class Color:
     g = 0.0 # type: float
     b = 0.0 # type: float
     a = 0.0 # type: float
+    r_2 = 0.0
+    g_2 = 0.0
+    b_2 = 0.0
 
     def __init__(self, r, g, b, a):
         self.r, self.g, self.b, self.a = r, g, b, a
+        self.r_2 = r/2
+        self.g_2 = g/2
+        self.b_2 = b/2
 
 # @dataclass
 class OBJObject:
@@ -64,13 +71,12 @@ class OBJObject:
                 <scale>{scale} {scale} {scale}</scale>
             </mesh>
         </geometry>
-        <max_contacts>10</max_contacts>
+        <max_contacts>100</max_contacts>
         <surface>
-            
             <contact>
                 <ode>
-                <max_vel>0</max_vel>
-                <min_depth>0.003</min_depth>
+                <max_vel>0.0</max_vel>
+                <min_depth>0.0</min_depth>
                 </ode>
             </contact>
             <friction>
@@ -84,6 +90,15 @@ class OBJObject:
             </friction>
             <bounce/>
         </surface>
+    <physics>
+        <ode>
+        <limit>
+            <cfm>0</cfm>
+            <erp>0.2</erp>
+        </limit>
+        <implicit_spring_damper>1</implicit_spring_damper>
+        </ode>
+    </physics>
     </collision>
     <visual name="visual">
         <geometry>
@@ -93,7 +108,7 @@ class OBJObject:
             </mesh>
         </geometry>
         <material>
-            <ambient>{color.r} {color.r} {color.r} {color.a}</ambient>
+            <ambient>{color.r_2} {color.r_2} {color.r_2} {color.a}</ambient>
             <diffuse>{color.r} {color.g} {color.b} {color.a}</diffuse>
             <specular>{color.r} {color.g} {color.b} {color.a}</specular>
             <emissive>0 0 0 0</emissive>
