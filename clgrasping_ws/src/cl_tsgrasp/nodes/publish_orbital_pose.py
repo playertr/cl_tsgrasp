@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/python3
 # Read in the end effector goal pose and publish an "orbital pose",
 # offset from the final pose, that the robot arm should achieve first.
 
@@ -6,8 +6,6 @@ import rospy
 from geometry_msgs.msg import PoseStamped, Pose, Vector3
 import quaternion
 import numpy as np
-
-import quaternion
 
 ## constants
 # TODO change to rosparam
