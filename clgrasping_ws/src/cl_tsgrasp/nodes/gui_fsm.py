@@ -70,6 +70,7 @@ with grasp_sm:
     )
 
 open_loop_grasp_sm = smach.StateMachine(outcomes=['GRASP_SUCCESS', 'GRASP_FAIL'])
+open_loop_grasp_sm.userdata.final_goal_pose_input = None
 with open_loop_grasp_sm:
     # Add states to the container
     smach.StateMachine.add(
@@ -86,6 +87,9 @@ with open_loop_grasp_sm:
         transitions={
             'in_orbital_pose': 'GO_TO_FINAL_POSE',
             'not_in_orbital_pose': 'GRASP_FAIL'
+        },
+        remapping={
+            'final_goal_pose':'final_goal_pose'
         }
     )
     smach.StateMachine.add(
@@ -94,6 +98,9 @@ with open_loop_grasp_sm:
         transitions={
             'in_grasp_pose': 'CLOSE_JAWS',
             'not_in_grasp_pose': 'GRASP_FAIL'
+        },
+        remapping={
+            'final_goal_pose_input':'final_goal_pose'
         }
     )
     smach.StateMachine.add(
@@ -174,6 +181,9 @@ while True:
     else:
         raise ValueError
     
-    window['-OUTPUT-'].update(state.execute([]))
+    class UserData:
+        final_goal_pose_input = None
+
+    window['-OUTPUT-'].update(state.execute(UserData()))
 
 window.close()

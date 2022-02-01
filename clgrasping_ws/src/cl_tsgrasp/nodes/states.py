@@ -16,9 +16,9 @@ ORBIT_RADIUS   = 0.1 # distance to initially orbit object before terminal homing
 # TerminalHoming
 GOAL_PUB_RATE   = 30
 STEP_SPEED      = 1.0
-SUCCESS_RADIUS  = 0.02 # in SE(3) space -- dimensionless
-TIMEOUT         = 80
-LAMBDA          = 0.1*np.array([1, 1, 1, 1, 1, 1])
+SUCCESS_RADIUS  = 0.005 # in SE(3) space -- dimensionless
+TIMEOUT         = 8
+LAMBDA          = 0.75*np.array([1, 1, 1, 1, 1, 1])
 
 # SpawnNewItem
 WORKSPACE_BOUNDS    = [[-0.1, -0.3], [0.1, -0.1]]
@@ -87,16 +87,23 @@ class Delay(smach.State):
 # GoToOrbitalPose state
 class GoToOrbitalPose(smach.State):
     _orbital_pose = None 
+    _final_goal_pose = None
 
     def __init__(self, mover: Mover):
-        smach.State.__init__(self, outcomes=['in_orbital_pose', 'not_in_orbital_pose'])
+        smach.State.__init__(self, outcomes=['in_orbital_pose', 'not_in_orbital_pose'], output_keys=['final_goal_pose'])
         self.mover = mover
         orbital_pose_sub = rospy.Subscriber(
             name='tsgrasp/orbital_pose', data_class=PoseStamped, 
+            callback=self._orbital_pose_cb, queue_size=1)
+        final_goal_pose_sub = rospy.Subscriber(
+            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
 
-    def _goal_pose_cb(self, msg):
+    def _orbital_pose_cb(self, msg):
         self._orbital_pose = msg
+
+    def _goal_pose_cb(self, msg):
+        self._final_goal_pose = msg
 
     def execute(self, userdata):
         rospy.loginfo('Executing state GO_TO_ORBITAL_POSE')
@@ -104,6 +111,7 @@ class GoToOrbitalPose(smach.State):
             rospy.loginfo('Orbital pose has not been initialized.')
             return 'not_in_orbital_pose'
 
+        userdata.final_goal_pose = self._final_goal_pose
         success = self.mover.go_ee_pose(self._orbital_pose)
         return 'in_orbital_pose' if success else 'not_in_orbital_pose'
 
@@ -210,11 +218,30 @@ class TerminalHoming(smach.State):
         return 'in_grasp_pose'
 
 class ServoToFinalPose(TerminalHoming):
-    """Just like TerminalHoming, but the target never moves after being set."""
+    """Just like TerminalHoming, but the target never moves after being set. Also accepts the target as a userdata element."""
+
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
+
+        goal_pose_sub = rospy.Subscriber(
+            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+        ee_pose_sub = rospy.Subscriber(
+            name='tsgrasp/ee_pose', 
+            data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
+        self._servo_twist_pub = rospy.Publisher(
+            name='/servo_server/delta_twist_cmds', 
+            data_class=numpy_msg(TwistStamped), queue_size=1)
 
     def _goal_pose_cb(self, msg):
         if self._goal_pose is None:
             self._goal_pose = msg
+
+    def execute(self, userdata):
+        if userdata.final_goal_pose_input is not None:
+            self._goal_pose = userdata.final_goal_pose_input
+
+        return super().execute(userdata)
 
 ## Open Jaws State
 class OpenJaws(smach.State):
