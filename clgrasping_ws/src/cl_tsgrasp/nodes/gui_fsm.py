@@ -2,10 +2,7 @@
 # Interactive GUI for transitioning FSM states.
 
 import rospy
-import smach_ros
 import smach
-import actionlib
-import cl_tsgrasp.msg
 from motion import Mover
 import PySimpleGUI as sg
 
@@ -21,7 +18,11 @@ rospy.wait_for_service("gazebo/spawn_sdf_model")
 mover = Mover()
 
 # import states AFTER this node and the services are initialized
-from states import  GoToOrbitalPose, ServoToFinalPose, TerminalHoming, SpawnNewItem, Delay, ResetPos, OpenJaws, CloseJaws, GoToFinalPose
+from states import  (
+    GoToOrbitalPose, ServoToFinalPose, TerminalHoming, 
+    SpawnNewItem, Delay, ResetPos, OpenJaws, CloseJaws, 
+    GoToFinalPose, AllowHandCollisions, DisallowHandCollisions
+)
 
 
 # sub- state machine for grasping
@@ -107,8 +108,16 @@ with open_loop_grasp_sm:
         'CLOSE_JAWS',
         CloseJaws(mover),
         transitions={
-            'jaws_closed': 'RESET_POS',
+            'jaws_closed': 'ALLOW_HAND_COLLISIONS',
             'jaws_not_closed': 'GRASP_FAIL'
+        }
+    )
+    smach.StateMachine.add(
+        'ALLOW_HAND_COLLISIONS',
+        AllowHandCollisions(mover),
+        transitions={
+            'hand_collisions_allowed': 'RESET_POS',
+            'hand_collisions_not_allowed': 'GRASP_FAIL'
         }
     )
     smach.StateMachine.add(
@@ -117,6 +126,14 @@ with open_loop_grasp_sm:
         transitions={
             'position_reset': 'GRASP_SUCCESS',
             'position_not_reset': 'GRASP_FAIL'
+        }
+    )
+    smach.StateMachine.add(
+        'DISALLOW_HAND_COLLISIONS',
+        DisallowHandCollisions(mover),
+        transitions={
+            'hand_collisions_disallowed': 'GRASP_SUCCESS',
+            'hand_collisions_not_disallowed': 'GRASP_FAIL'
         }
     )
 
@@ -131,6 +148,8 @@ close_jaws = CloseJaws(mover)
 go_to_final_pose = GoToFinalPose(mover)
 servo_to_final_pose = ServoToFinalPose()
 grasp_open_loop = open_loop_grasp_sm
+allow_hand_collisions = AllowHandCollisions(mover)
+disallow_hand_collisions = DisallowHandCollisions(mover)
 
 sg.theme('DarkAmber')   # Add a touch of color
 
@@ -146,6 +165,8 @@ layout = [  [sg.Button('reset_pos')],
             [sg.Button('servo_to_final_pose')],
             [sg.Button('terminal_homing')],
             [sg.Button('close_jaws')], 
+            [sg.Button('allow_hand_collisions')],
+            [sg.Button('disallow_hand_collisions')],  
             [sg.Text(size=(15,1), key='-OUTPUT-')]]
 
 # Create the Window
@@ -178,6 +199,10 @@ while True:
         state = terminal_homing
     elif event == 'close_jaws':
         state = close_jaws
+    elif event == 'allow_hand_collisions':
+        state = allow_hand_collisions
+    elif event == 'disallow_hand_collisions':
+        state = disallow_hand_collisions
     else:
         raise ValueError
     
