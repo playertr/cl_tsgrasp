@@ -1,5 +1,6 @@
 #! /usr/bin/python3
 
+from shutil import move
 import moveit_commander
 
 import geometry_msgs.msg
@@ -36,14 +37,23 @@ def all_close(goal, actual, tolerance):
 class Mover:
     """Wrapper around MoveIt functionality for the panda arm."""
 
-    arm: moveit_commander.MoveGroupCommander
-    gripper: moveit_commander.MoveGroupCommander
+    arm_move_group_cmdr: moveit_commander.MoveGroupCommander
+    arm_robot_cmdr: moveit_commander.RobotCommander
+    arm_group_name: str
+    scene: moveit_commander.PlanningSceneInterface
+    gripper_pub: rospy.Publisher
+    box_name: str = None
+    grasping_group_name: str
 
     def __init__(self):
         moveit_commander.roscpp_initialize([])
-        self.arm = moveit_commander.MoveGroupCommander("panda_arm")
-                
+        self.arm_group_name = "panda_arm"
+        self.grasping_group_name = "panda_hand"
+        self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name)
+        self.arm_robot_cmdr = moveit_commander.RobotCommander()
+        self.scene = moveit_commander.PlanningSceneInterface()
         self.gripper_pub = rospy.Publisher('/panda_hand_controller/command', data_class=JointTrajectory, queue_size=1)
+        # rospy.init_node("move_group_python", anonymous=True) # node for modifying PlanningScene
 
     def go_joints(self, joints: np.ndarray, wait: bool = True):
         """Move robot to the given 7-element joint configuration.
@@ -52,8 +62,8 @@ class Mover:
             joints (np.ndarray): joint angles for panda
             wait (bool): whether to block until finished 
         """
-        plan = self.arm.go(joints, wait=wait)
-        self.arm.stop()
+        plan = self.arm_move_group_cmdr.go(joints, wait=wait)
+        self.arm_move_group_cmdr.stop()
         return plan
 
     # def go_gripper(self, pos: np.ndarray, wait: bool = True):
@@ -99,11 +109,41 @@ class Mover:
             wait (bool): whether to block until finished
         """
 
-        self.arm.set_pose_target(pose)
-        plan = self.arm.go(wait=wait)
-        self.arm.stop()
-        self.arm.clear_pose_targets()
+        self.arm_move_group_cmdr.set_pose_target(pose)
+        plan = self.arm_move_group_cmdr.go(wait=wait)
+        self.arm_move_group_cmdr.stop()
+        self.arm_move_group_cmdr.clear_pose_targets()
         return plan
 
     def get_ee_pose(self):
-        return self.arm.get_current_pose()
+        return self.arm_move_group_cmdr.get_current_pose()
+
+    def add_object_for_pickup(self):
+        """Add a box object to the PlanningScene so that collisions with the 
+        hand are ignored. Otherwise, no collision-free trajectories can be found 
+        after an object is picked up."""
+
+        eef_link = self.arm_move_group_cmdr.get_end_effector_link()
+
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = "panda_hand"
+        box_pose.pose.orientation.w = 1.0
+        box_pose.pose.position.z = 0.11  # above the panda_hand frame
+        self.box_name = "hand_collision_box"
+        self.scene.add_box(self.box_name, box_pose, size=(0.075, 0.075, 0.075))
+
+        touch_links = self.arm_robot_cmdr.get_link_names(group=self.grasping_group_name)
+        self.scene.attach_box(eef_link, self.box_name, touch_links=touch_links)
+
+
+    def remove_object_after_pickup(self):
+        """Remove a PlanningScene box after adding it in add_object_for_pickup."""
+
+        eef_link = self.arm_move_group_cmdr.get_end_effector_link()
+
+        if self.box_name is not None:
+            self.scene.remove_attached_object(eef_link, name=self.box_name)
+            self.scene.remove_world_object(self.box_name)
+            self.box_name = None
+        else:
+            raise ValueError("No box was added to the planning scene. Did you call add_object_for_pickup?")
