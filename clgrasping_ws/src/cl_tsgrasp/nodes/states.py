@@ -10,8 +10,6 @@ import tf.transformations
 from motion import Mover
 
 ## constants
-# GoToOrbitalPose
-ORBIT_RADIUS   = 0.1 # distance to initially orbit object before terminal homing
 
 # TerminalHoming
 GOAL_PUB_RATE   = 30
@@ -242,6 +240,56 @@ class ServoToFinalPose(TerminalHoming):
             self._goal_pose = userdata.final_goal_pose_input
 
         return super().execute(userdata)
+
+class ServoToOrbitalPose(TerminalHoming):
+    """Just like TerminalHoming, but the target never moves after being set. Also accepts the target as a userdata element."""
+
+    def __init__(self):
+        smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
+
+        goal_pose_sub = rospy.Subscriber(
+            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+        ee_pose_sub = rospy.Subscriber(
+            name='tsgrasp/ee_pose', 
+            data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
+        self._servo_twist_pub = rospy.Publisher(
+            name='/servo_server/delta_twist_cmds', 
+            data_class=numpy_msg(TwistStamped), queue_size=1)
+
+    def _goal_pose_cb(self, msg):
+        if self._goal_pose is None:
+            self._goal_pose = msg
+
+    def execute(self, userdata):
+        if userdata.final_goal_pose_input is not None:
+            self._goal_pose = userdata.final_goal_pose_input
+
+        return super().execute(userdata)
+
+## Allow Hand Collisions state
+class AllowHandCollisions(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['hand_collisions_allowed', 'hand_collisions_not_allowed'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Allowing hand collisions by adding PlanningScene object.')
+        self.mover.add_object_for_pickup()
+        return 'hand_collisions_allowed'
+
+## Disallow Hand Collisions state
+class DisallowHandCollisions(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['hand_collisions_disallowed', 'hand_collisions_not_disallowed'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Disallowing hand collisions by removing PlanningScene object.')
+        self.mover.remove_object_after_pickup()
+        return 'hand_collisions_disallowed'
 
 ## Open Jaws State
 class OpenJaws(smach.State):
