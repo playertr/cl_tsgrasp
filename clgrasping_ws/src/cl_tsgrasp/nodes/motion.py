@@ -1,6 +1,5 @@
 #! /usr/bin/python3
 
-from shutil import move
 import moveit_commander
 
 import geometry_msgs.msg
