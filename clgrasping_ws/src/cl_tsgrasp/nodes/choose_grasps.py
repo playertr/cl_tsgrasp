@@ -1,4 +1,4 @@
-#! /usr/bin/python
+#! /usr/bin/python3
 # Select the best grasp from the published Grasps message.
 
 import rospy
