@@ -145,6 +145,8 @@
             </contact>
             <bounce/>
             <friction>
+              <mu>1.13</mu>
+              <mu2>1.13</mu2>
               <torsional>
                 <ode/>
               </torsional>
