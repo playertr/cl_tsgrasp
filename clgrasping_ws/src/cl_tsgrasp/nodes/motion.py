@@ -1,6 +1,7 @@
 #! /usr/bin/python3
 
 import moveit_commander
+import sys
 
 import geometry_msgs.msg
 from moveit_commander.conversions import pose_to_list
@@ -45,14 +46,16 @@ class Mover:
     grasping_group_name: str
 
     def __init__(self):
-        moveit_commander.roscpp_initialize([])
-        self.arm_group_name = "panda_arm"
-        self.grasping_group_name = "panda_hand"
-        self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name)
-        self.arm_robot_cmdr = moveit_commander.RobotCommander()
+        moveit_commander.roscpp_initialize(sys.argv)
+        self.arm_group_name = "arm"
+        self.grasping_group_name = "hand"
+        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description")
+        self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name, robot_description="/bravo/robot_description")
         self.scene = moveit_commander.PlanningSceneInterface()
-        self.gripper_pub = rospy.Publisher('/panda_hand_controller/command', data_class=JointTrajectory, queue_size=1)
+        self.gripper_pub = rospy.Publisher('/bravo/arm_position_controller/command', data_class=JointTrajectory, queue_size=1)
         # rospy.init_node("move_group_python", anonymous=True) # node for modifying PlanningScene
+
+        self.arm_move_group_cmdr.set_planner_id("RRTConnectkConfigDefault")
 
     def go_joints(self, joints: np.ndarray, wait: bool = True):
         """Move robot to the given 7-element joint configuration.
@@ -88,7 +91,7 @@ class Mover:
         # publisher.publish(Float64MultiArray(data=pos))
 
         jt = JointTrajectory()
-        jt.joint_names = 'panda_finger_joint1', 'panda_finger_joint2'
+        jt.joint_names = 'bravo_axis_a'
         jt.header.stamp = rospy.Time.now()
 
         jtp = JointTrajectoryPoint()
@@ -125,7 +128,7 @@ class Mover:
         eef_link = self.arm_move_group_cmdr.get_end_effector_link()
 
         box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = "panda_hand"
+        box_pose.header.frame_id = "ee_link"
         box_pose.pose.orientation.w = 1.0
         box_pose.pose.position.z = 0.11  # above the panda_hand frame
         self.box_name = "hand_collision_box"
