@@ -11,3 +11,4 @@ frames.gv
 *.catkin_tools
 *.ckpt
 *.pyc
+config/machine_setup.bash
