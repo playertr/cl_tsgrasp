@@ -143,15 +143,22 @@
     <!-- <node pkg="rqt_joint_trajectory_controller" type="rqt_joint_trajectory_controller" name="rqt_joint_trajectory_controller" ns="bravo"/> -->
 
     <!-- Grasp network node -->
-    <!-- xterm -hold -e -->
     <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
-     output="screen" respawn="true" launch-prefix="$(env NN_CONDA_PATH)"/>
+     output="screen" respawn="true" launch-prefix="xterm -hold -e $(env NN_CONDA_PATH)">
+        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
+    </node>
+
+    <rosparam file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
+    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen">
+        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
+        <remap from="tsgrasp/grasps_filtered" to="tsgrasp/grasps" />
+    </node>
 
     <!-- Node to select goal pose -->
     <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" launch-prefix="xterm -hold -e "/>
 
     <!-- Node to publish orbital pose -->
-    <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" />
+    <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" launch-prefix="xterm -hold -e " />
 
     <!-- Node to publish end effector pose -->
     <node pkg="cl_tsgrasp" type="publish_ee_pose.py" respawn="true" name="publish_ee_pose"  output="screen" launch-prefix="xterm -hold -e " />
