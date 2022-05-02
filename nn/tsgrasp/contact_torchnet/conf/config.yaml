@@ -1,5 +1,0 @@
-defaults:
-  - training: default
-  - model: contact_torchnet
-  - data: acronymvid
-  - _self_

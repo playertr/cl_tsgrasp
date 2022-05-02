@@ -1,3 +1,3 @@
-[submodule "clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp"]
+[submodule "nn/tsgrasp"]
 	path = nn/tsgrasp
 	url = git@github.com:playertr/tsgrasp.git

@@ -1,6 +1,0 @@
-[submodule "contact_graspnet"]
-	path = contact_graspnet
-	url = git@github.com:NVlabs/contact_graspnet.git
-[submodule "contact_torchnet"]
-	path = contact_torchnet
-	url = git@github.com:playertr/contact_torchnet.git
