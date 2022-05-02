@@ -25,6 +25,8 @@ def gripper_marker():
 
 def poses_cb(msg):
     
+    if len(msg.confs) == 0: return
+    
     viridis = cm.get_cmap('viridis', 12)
 
     _range = max(msg.confs) - min(msg.confs)
