@@ -49,10 +49,10 @@ class Mover:
         moveit_commander.roscpp_initialize(sys.argv)
         self.arm_group_name = "arm"
         self.grasping_group_name = "hand"
-        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description")
+        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description", ns="bravo")
         self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name, robot_description="/bravo/robot_description")
         self.scene = moveit_commander.PlanningSceneInterface()
-        self.gripper_pub = rospy.Publisher('/bravo/arm_position_controller/command', data_class=JointTrajectory, queue_size=1)
+        self.gripper_pub = rospy.Publisher('/bravo/hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
         # rospy.init_node("move_group_python", anonymous=True) # node for modifying PlanningScene
 
         self.arm_move_group_cmdr.set_planner_id("RRTConnectkConfigDefault")
@@ -91,7 +91,7 @@ class Mover:
         # publisher.publish(Float64MultiArray(data=pos))
 
         jt = JointTrajectory()
-        jt.joint_names = 'bravo_axis_a'
+        jt.joint_names = ['bravo_axis_a']
         jt.header.stamp = rospy.Time.now()
 
         jtp = JointTrajectoryPoint()
@@ -107,11 +107,12 @@ class Mover:
         """Move the end effector to the given pose.
 
         Args:
-            pose (geometry_msgs.msg.Pose): desired pose for panda_hand
+            pose (geometry_msgs.msg.Pose): desired pose for end effector
             wait (bool): whether to block until finished
         """
 
         self.arm_move_group_cmdr.set_pose_target(pose)
+        self.arm_move_group_cmdr.set_goal_tolerance(0.1)
         plan = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
