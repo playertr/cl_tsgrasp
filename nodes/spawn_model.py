@@ -126,7 +126,10 @@ def get_obj(h5_path, mesh_dir):
         inertia = np.asarray(ds['object/inertia'])
         scale = ds['object/scale'][()]
         friction = ds['object/friction'][()]
-        file = ds['object/file'][()].decode('utf-8')
+        try:
+            file = ds['object/file'][()].decode('utf-8')
+        except AttributeError as e:
+            file = ds['object/file'][()]
         center_of_mass = np.asarray(ds['object/com'])
         # file is like 
         # meshes/1Shelves/1e3df0ab57e8ca8587f357007f9e75d1.obj
