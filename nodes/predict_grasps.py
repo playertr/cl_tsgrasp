@@ -323,11 +323,6 @@ def identify_grasps(pts):
 
 def filter_grasps(grasps, confs):
 
-    try: 
-        len(confs.squeeze())
-    except:
-        breakpoint()
-
     # confidence thresholding
     grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
     confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
@@ -336,7 +331,7 @@ def filter_grasps(grasps, confs):
         return None, None
 
     # top-k selection
-    vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, len(confs.squeeze())), sorted=True)
+    vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, confs.squeeze().numel()), sorted=True)
     grasps = grasps[top_idcs]
     confs = confs[top_idcs]
 
@@ -407,7 +402,6 @@ def find_grasps():
         with TimeIt('Find Grasps'):
             grasps, confs   = identify_grasps(pts)
             all_confs       = confs.clone() # keep the pointwise confs for plotting later
-            if pts is None or len(pts[-1]) == 0: return
 
         # Filter the grasps by thresholding and furthest-point sampling.
         with TimeIt('Filter Grasps'):
@@ -478,6 +472,9 @@ def depth_callback(depth_msg):
 # depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
 depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
 ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
+
+r = rospy.Rate(5)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
+    r.sleep()
