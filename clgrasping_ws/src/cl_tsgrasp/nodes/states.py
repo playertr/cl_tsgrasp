@@ -33,11 +33,11 @@ class SpawnNewItem(smach.State):
         smach.State.__init__(self, outcomes=['spawned_new_item'])
 
         self.obj_ds = ObjectDataset(
-            dataset_dir="/home/tim/Research/tsgrasp/data/dataset",
+            dataset_dir="/home/playert/Research/dataset",
             split="train"
         )
-        self.delete_model = rospy.ServiceProxy("gazebo/delete_model", DeleteModel)
-        self.spawn_model = rospy.ServiceProxy("gazebo/spawn_sdf_model", SpawnModel)
+        self.delete_model = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)
+        self.spawn_model = rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)
         self._cur_idx = np.random.randint(0, len(self.obj_ds))
 
     @staticmethod
@@ -91,10 +91,10 @@ class GoToOrbitalPose(smach.State):
         smach.State.__init__(self, outcomes=['in_orbital_pose', 'not_in_orbital_pose'], output_keys=['final_goal_pose'])
         self.mover = mover
         orbital_pose_sub = rospy.Subscriber(
-            name='tsgrasp/orbital_pose', data_class=PoseStamped, 
+            name='/tsgrasp/orbital_pose', data_class=PoseStamped, 
             callback=self._orbital_pose_cb, queue_size=1)
         final_goal_pose_sub = rospy.Subscriber(
-            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
 
     def _orbital_pose_cb(self, msg):
@@ -121,7 +121,7 @@ class GoToFinalPose(smach.State):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'])
         self.mover = mover
         orbital_pose_sub = rospy.Subscriber(
-            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
 
     def _goal_pose_cb(self, msg):
@@ -145,10 +145,10 @@ class TerminalHoming(smach.State):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'])
 
         goal_pose_sub = rospy.Subscriber(
-            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
         ee_pose_sub = rospy.Subscriber(
-            name='tsgrasp/ee_pose', 
+            name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
             name='/servo_server/delta_twist_cmds', 
@@ -222,10 +222,10 @@ class ServoToFinalPose(TerminalHoming):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
 
         goal_pose_sub = rospy.Subscriber(
-            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
         ee_pose_sub = rospy.Subscriber(
-            name='tsgrasp/ee_pose', 
+            name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
             name='/servo_server/delta_twist_cmds', 
@@ -248,10 +248,10 @@ class ServoToOrbitalPose(TerminalHoming):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
 
         goal_pose_sub = rospy.Subscriber(
-            name='tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
             callback=self._goal_pose_cb, queue_size=1)
         ee_pose_sub = rospy.Subscriber(
-            name='tsgrasp/ee_pose', 
+            name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
             name='/servo_server/delta_twist_cmds', 
