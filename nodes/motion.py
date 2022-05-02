@@ -117,6 +117,18 @@ class Mover:
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
         return plan
+    
+    def go_named_group_state(self, state: str, wait: bool = True):
+        """Move the arm group to a named state from the SRDF.
+
+        Args:
+            state (str): the name of the state
+            wait (bool, optional): whether to block until finished. Defaults to True.
+        """
+        self.arm_move_group_cmdr.set_named_target(state)
+        plan = self.arm_move_group_cmdr.go(wait=wait)
+        self.arm_move_group_cmdr.stop()
+        return plan
 
     def get_ee_pose(self):
         return self.arm_move_group_cmdr.get_current_pose()
