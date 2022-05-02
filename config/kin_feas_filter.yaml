@@ -1,0 +1,9 @@
+kin_feas_filter:
+  ik_timeout: 0.002
+  robot_description_name: bravo/robot_description
+  move_group_name: arm
+  input_grasps_topic: tsgrasp/grasps
+  output_grasps_topic: tsgrasp/grasps_filtered
+  num_threads: 2
+  # setting to a number < 1 or greater than omp_get_max_threads() sets to max
+  
