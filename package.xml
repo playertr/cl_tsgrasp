@@ -33,6 +33,9 @@
   <!-- Examples: -->
   <!-- Use depend as a shortcut for packages that are both build and exec dependencies -->
   <!--   <depend>roscpp</depend> -->
+  <build_depend>eigen</build_depend>
+  <build_depend>cmake_modules</build_depend>
+  <depend>moveit</depend>
   <depend>actionlib_msgs</depend>
   <depend>teleop_twist_joy</depend>
   <depend>xterm</depend>
