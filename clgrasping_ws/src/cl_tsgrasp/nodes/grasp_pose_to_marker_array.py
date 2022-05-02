@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python3
 # Read in the predicted grasp poses and publish markers to visualize.
 # Each marker shows the grasp pose and the quality relative to the other reported potential grasp poses.
 
