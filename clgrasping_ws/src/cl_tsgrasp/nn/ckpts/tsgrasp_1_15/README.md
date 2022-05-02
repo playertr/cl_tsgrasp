@@ -55,7 +55,7 @@ data:
       acronym_repo: /scratch/playert/workdir/acronym
       mesh_dir: ${hydra:runtime.cwd}/data/obj/
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_1_15/model.ckpt
+ckpt_path: tsgrasp_1_15/model.ckpt
 """
 ```
 

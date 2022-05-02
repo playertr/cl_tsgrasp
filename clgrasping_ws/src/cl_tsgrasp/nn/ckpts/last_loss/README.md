@@ -55,7 +55,7 @@ data:
       mesh_dir: ${hydra:runtime.cwd}/data/obj/
       acronym_repo: /scratch/playert/workdir/acronym
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/last_loss/model.ckpt
+ckpt_path: last_loss/model.ckpt
 """
 ```
 

@@ -30,7 +30,7 @@ training:
     learning_rate: 0.00025
     lr_decay: 0.99
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_12_28_v30/model.ckpt
+ckpt_path: tsgrasp_12_28_v30/model.ckpt
 """
 ```
 

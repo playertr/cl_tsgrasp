@@ -32,7 +32,7 @@ model:
     dilations:
     - 1 1 1 1
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_otf_v2/model.ckpt
+ckpt_path: tsgrasp_otf_v2/model.ckpt
 """
 ```
 

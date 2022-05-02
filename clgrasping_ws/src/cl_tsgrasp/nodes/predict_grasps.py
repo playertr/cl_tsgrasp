@@ -1,33 +1,35 @@
-#! /home/tim/anaconda3/envs/tsgrasp/bin/python
-# shebang is for the Python3 environment with all dependencies
+try:
+    # tsgrasp dependencies
+    import sys
+    from typing import List
+    sys.path.append("/home/playert/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/")
+    from nn.load_model import load_model
 
-# tsgrasp dependencies
-import sys
-from typing import List
-sys.path.append("/home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/")
-from nn.load_model import load_model
+    # ROS dependencies
+    import rospy
+    from geometry_msgs.msg import Pose, PoseStamped
+    from std_msgs.msg import Header
+    from sensor_msgs.msg import PointCloud2, PointField
+    from rospy.numpy_msg import numpy_msg
+    from cl_tsgrasp.msg import Grasps
+    import sensor_msgs.point_cloud2 as pcl2
+    import ros_numpy
 
-# ROS dependencies
-import rospy
-from geometry_msgs.msg import Pose, PoseStamped
-from std_msgs.msg import Header
-from sensor_msgs.msg import PointCloud2, PointField
-from rospy.numpy_msg import numpy_msg
-from cl_tsgrasp.msg import Grasps
-import sensor_msgs.point_cloud2 as pcl2
-import ros_numpy
-
-# python dependencies
-import numpy as np
-from collections import deque
-import torch
-from threading import Lock
-import copy
-from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
-import math
-import MinkowskiEngine as ME
-from pytorch3d.ops import sample_farthest_points
-# torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
+    # python dependencies
+    import numpy as np
+    from collections import deque
+    import torch
+    from threading import Lock
+    import copy
+    from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
+    import math
+    import MinkowskiEngine as ME
+    from pytorch3d.ops import sample_farthest_points
+    # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
+except ImportError as e:
+    print(e)
+    print("roslaunch must invoke this script using the NN_CONDA_PATH specified in config/computer_setup.yaml:")
+    print("\t\t")
 
 ## global constants
 QUEUE_LEN       = 4
@@ -35,9 +37,7 @@ PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1034
 CONF_THRESHOLD  = 0 #0.5
 TOP_K           = 400
-# BOUNDS          = torch.Tensor([[-0.1, -0.3, 0.3], [0.1, -0.1, 0.65]]) # (xyz_lower, xyz_upper)
-
-BOUNDS          = torch.Tensor([[-0.2, -0.3, 0.3], [0.3, 0.3, 0.65]]) # (xyz_lower, xyz_upper)
+BOUNDS          = torch.Tensor([[-2, -2, 0], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0

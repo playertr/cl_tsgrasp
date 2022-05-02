@@ -43,7 +43,7 @@ data:
   data_cfg:
     num_workers: 0
     data_proportion_per_epoch: 1
-    dataroot: /home/tim/Research/contact_graspnet/acronym
+    dataroot: /home/playert/Research/contact_graspnet/acronym
     frames_per_traj: 4
     points_per_frame: 45000
     min_pitch: 0.0
@@ -59,7 +59,7 @@ data:
       gaussian_kernel: 0
       sigma: 0.001
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_scene_4_frames/model.ckpt
+ckpt_path: tsgrasp_scene_4_frames/model.ckpt
 """
 ```
 

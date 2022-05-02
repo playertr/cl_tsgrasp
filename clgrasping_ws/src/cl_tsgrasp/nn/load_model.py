@@ -1,8 +1,8 @@
-#! /home/tim/anaconda3/envs/tsgrasp/bin/python
+#! /home/playert/miniconda3/envs/tsgrasp/bin/python
 # shebang is for the Python3 environment with the network dependencies
 
-import sys
-sys.path.append("/home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/tsgrasp")
+import sys, os
+sys.path.append(os.environ['NN_SRC_DIR'])
 
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -45,7 +45,7 @@ data:
   data_cfg:
     num_workers: 0
     data_proportion_per_epoch: 1
-    dataroot: /home/tim/Research/contact_graspnet/acronym
+    dataroot: /home/playert/Research/contact_graspnet/acronym
     frames_per_traj: 4
     points_per_frame: 45000
     min_pitch: 0.0
@@ -61,11 +61,12 @@ data:
       gaussian_kernel: 0
       sigma: 0.001
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_scene_4_frames/model.ckpt
+ckpt_path: tsgrasp_scene_4_frames/model.ckpt
 """
 
 def load_model():
     cfg = OmegaConf.create(cfg_str)
     pl_model = instantiate(cfg.model, training_cfg=cfg.training)
-    pl_model.load_state_dict(torch.load(cfg.ckpt_path)['state_dict'])
+    path = os.environ['NN_CKPT_DIR'] + cfg.ckpt_path
+    pl_model.load_state_dict(torch.load(path)['state_dict'])
     return pl_model

@@ -43,7 +43,7 @@ data:
   data_cfg:
     num_workers: 4
     data_proportion_per_epoch: 1
-    dataroot: /home/tim/Research/tsgrasp/data/dataset
+    dataroot: /home/playert/Research/tsgrasp/data/dataset
     frames_per_traj: 1
     points_per_frame: 90000
     min_pitch: 0.0
@@ -56,10 +56,10 @@ data:
     renderer:
       height: 300
       width: 300
-      acronym_repo: /home/tim/Research/acronym
+      acronym_repo: /home/playert/Research/acronym
       mesh_dir: ${hydra:runtime.cwd}/data/obj/
 
-ckpt_path: /home/tim/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/nn/ckpts/tsgrasp_1_24_90000/model.ckpt
+ckpt_path: tsgrasp_1_24_90000/model.ckpt
 """
 ```
 
