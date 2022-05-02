@@ -21,7 +21,6 @@ find_package(catkin REQUIRED COMPONENTS
     actionlib_msgs
     roscpp
     genmsg
-    moveit_grasps
 )
 
 ## System dependencies are found with CMake's conventions
@@ -130,7 +129,6 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
-  moveit_grasps/include
 )
 
 ## Declare a C++ library
