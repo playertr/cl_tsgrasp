@@ -319,21 +319,11 @@ class CloseJaws(smach.State):
 ## Reset Position State
 class ResetPos(smach.State):
 
-    STARTING_POS = np.array([
-        0.0,
-        -0.9,
-        0.0,
-        -1.65,
-        0.0,
-        1.40,
-        0.0
-    ])
-
     def __init__(self, mover: Mover):
         smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
         self.mover = mover
 
     def execute(self, userdata):
         rospy.loginfo('Executing state RESET_POSITION')
-        success = self.mover.go_joints(self.STARTING_POS)
+        success = self.mover.go_named_group_state('rest')
         return 'position_reset' if success else 'position_not_reset'
