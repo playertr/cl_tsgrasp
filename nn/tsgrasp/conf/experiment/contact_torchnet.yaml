@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - override /model: temporal_ctn
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+    points_per_frame: 20000
+
+model:
+  model_cfg:
+    top_confidence_quantile: 1.0 # Only backprop this proportion of BCE losses
+    pt_radius: 0.005
+    add_s_loss_coeff: 10
+    bce_loss_coeff: 1
+    width_loss_coeff: 1
+
+training:
+  batch_size: 1
+  gpus: 2
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "contact_torchnet"
+    notes: "First run after Nov. 16 refactor."

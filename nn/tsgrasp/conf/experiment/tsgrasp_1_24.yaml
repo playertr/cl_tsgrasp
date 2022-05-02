@@ -1,0 +1,36 @@
+# @package _global_
+
+defaults:
+  - override /model: tsgraspnet
+  - override /data: acronym_render_dm
+
+data:
+  data_cfg:
+
+    num_workers: 12
+
+    points_per_frame: 90000
+
+    frames_per_traj: 1
+    min_pitch: 0.0 # 0 degrees (looking straight down)
+    max_pitch: 1.222 # 70 degrees
+
+    renderer:
+      mesh_dir: ${hydra:runtime.cwd}/data/obj/
+      acronym_repo: /scratch/playert/workdir/acronym
+    
+    augmentations:
+      add_random_jitter: True
+      random_jitter_sigma: 0.0001
+      add_random_rotations: False
+      add_random_rotation_about_z: True
+
+training:
+  batch_size: 16
+  gpus: 4
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "tsgrasp_1_24"
+    notes: "Jan 15 run with all-frame loss, last-cam frame, and only one frame."

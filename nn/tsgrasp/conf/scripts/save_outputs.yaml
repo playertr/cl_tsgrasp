@@ -1,0 +1,34 @@
+# @package _global_
+
+# defaults:
+#   - model: ???
+#   - data: acronymvid
+#   - training: default   # needed for batch_size, etc.
+#   - _self_
+
+# ckpt_path: ???
+# output_name: ???
+# output_path: ${hydra:runtime.cwd}/experiments/${output_name}
+
+# description: ??? # Informative blurb about the model being saved.
+
+## Test config
+defaults:
+  - /model: tsgraspnet
+  - /data: acronymvid
+  - /training: default   # needed for batch_size, etc.
+  - _self_
+
+ckpt_path: ${hydra:runtime.cwd}/ckpts/tsgraspnet_11_17/model.ckpt
+output_name: test_save_outputs
+output_path: ${hydra:runtime.cwd}/experiments/${output_name}.h5
+
+description: This is a test run of the output saver.
+
+training:
+  gpus: 1
+  batch_size: 8
+
+data:
+  data_cfg:
+    points_per_frame: 1000

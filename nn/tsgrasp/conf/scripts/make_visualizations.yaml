@@ -1,0 +1,11 @@
+# @package _global_
+
+gpus: 0
+
+
+output_name: tsgraspnet_11_17
+output_dir: ${hydra:runtime.cwd}/experiments
+
+output_path: ${output_dir}/${output_name}.h5
+
+gif_path: ${output_dir}/${output_name}/figs

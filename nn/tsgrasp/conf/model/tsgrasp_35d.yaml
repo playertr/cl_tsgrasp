@@ -1,0 +1,19 @@
+# @package model
+
+# Pytorch Lightning module to instantiate
+_target_: tsgrasp.net.lit_tsgrasp_35d.LitTSGraspNet35D
+
+# Params for Pytorch module
+model_cfg:
+  backbone_model_name: "MinkUNet14A"
+  D: 3
+  backbone_out_dim: 128
+  add_s_loss_coeff: 10
+  bce_loss_coeff: 1
+  width_loss_coeff: 1
+  top_confidence_quantile: 1.0 # Only backprop this proportion of BCE losses
+  feature_dimension: 1
+  pt_radius: 0.005
+  grid_size: 0.005
+  conv1_kernel_size: 3
+  dilations: [1 1 1 1]

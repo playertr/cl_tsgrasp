@@ -1,0 +1,36 @@
+# @package _global_
+
+defaults:
+  - override /model: tsgraspnet
+  - override /data: acronym_render_dm
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/tsgrasp/data/dataset
+    points_per_frame: 45000
+
+    num_workers: 8
+
+    frames_per_traj: 8
+
+    renderer:
+      mesh_dir: ${hydra:runtime.cwd}/data/obj/
+      acronym_repo: /scratch/playert/acronym
+    
+    augmentations:
+      add_random_jitter: True
+      randome_jitter_sigma: 0.0001
+      add_random_rotations: True
+
+training:
+  batch_size: 3
+  gpus: 6
+  optimizer:
+    learning_rate: 0.0002
+    lr_decay: 0.95
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "data_aug2"
+    notes: "Run with OTF rendering, remotely-processed dataset, and last-cam-frame."

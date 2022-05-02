@@ -1,0 +1,10 @@
+# @package training
+gpus: 1
+batch_size: 1
+max_epochs: 100
+# resume_from_checkpoint: "/home/playert/Research/tsgrasp/outputs/2021-09-17/11-32-05/default/0/checkpoints/epoch=1-step=31.ckpt"
+save_figs: False
+use_wandb: False
+wandb:
+  project: "ContactTorchNet"
+  experiment: "test"

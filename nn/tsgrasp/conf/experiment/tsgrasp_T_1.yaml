@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - override /model: tsgraspnet
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+    points_per_frame: 45000
+    time_decimation_factor: 30
+
+training:
+  batch_size: 8
+  gpus: 1
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "tsgrasp_T_1"
+    notes: "Identical to tf_refactor, but with data time length of 1."

@@ -1,0 +1,21 @@
+# @package _global_
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+    grid_size: 0.005
+    points_per_frame: 45000
+
+model:
+  model_cfg:
+    top_confidence_quantile: 1.0 # Only backprop this proportion of BCE losses
+
+
+training:
+  batch_size: 4
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "topk_bce_all"
+    notes: "Used all points for BCE, not just the top 25% of losses."

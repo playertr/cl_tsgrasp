@@ -1,0 +1,30 @@
+<launch>
+
+
+      <!-- By default, we are not in debug mode -->
+<!--         
+  <arg name="debug" default="false" />
+  <arg name="pipeline" default="ompl" /> -->
+  
+    <!-- Run the main MoveIt executable without trajectory execution (we do not have controllers configured by default) -->
+<!--       
+  <include file="$(find panda_moveit_config)/launch/move_group.launch">
+      <arg name="allow_trajectory_execution" value="true"/>
+      <arg name="fake_execution" value="true"/>
+      <arg name="info" value="true"/>
+      <arg name="debug" value="$(arg debug)"/>
+      <arg name="pipeline" value="$(arg pipeline)"  />
+  </include> -->
+  
+  <!-- <node name="spacenav_node" pkg="spacenav_node" type="spacenav_node" />
+
+  <node name="spacenav_to_twist" pkg="moveit_servo" type="spacenav_to_twist" output="screen" /> -->
+
+  <node name="servo_server" pkg="moveit_servo" type="servo_server" output="screen">
+    <param name="parameter_ns" type="string" value="optional_parameter_namespace" />
+    <rosparam ns="optional_parameter_namespace" command="load" file="$(find cl_tsgrasp)/config/panda_moveit_servo.yaml" />
+  </node>
+
+
+</launch>
+  

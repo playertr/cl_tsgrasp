@@ -1,0 +1,13 @@
+# @package data
+
+# Pytorch Lightning datamodule to instantiate
+_target_: tsgrasp.data.lit_acronymvid.LitAcronymvidDataset
+
+data_cfg:
+  # dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+  dataroot: /home/playert/Research/tsgrasp/data/acronymvid
+  points_per_frame: 45000
+  num_workers: 4
+
+  time_decimation_factor: 3
+  data_proportion_per_epoch: 1 # portion seen in each epoch

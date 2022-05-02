@@ -1,0 +1,39 @@
+# @package _global_
+
+defaults:
+  - override /model: tsgraspnet
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+    points_per_frame: 45000
+
+training:
+  batch_size: 8
+  gpus: 1
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "tsgraspnet-kern5"
+    notes: "First convolutional kernel size of 5."
+
+model:
+  model_cfg:
+    # Backbone
+    backbone_model_name: "MinkUNet14A"
+    D: 4
+    feature_dimension: 1
+    backbone_out_dim: 128
+    conv1_kernel_size: 5
+    dilations: [1 1 1 1]
+    grid_size: 0.005
+
+    # Loss
+    add_s_loss_coeff: 10
+    bce_loss_coeff: 1
+    width_loss_coeff: 1
+    top_confidence_quantile: 1.0 # Only backprop this proportion of BCE losses
+
+    # Labeling
+    pt_radius: 0.005

@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - override /model: tsgraspnet
+
+data:
+  data_cfg:
+    dataroot: /scratch/playert/workdir/tsgrasp/data/acronymvid
+    points_per_frame: 45000
+
+model:
+  model_cfg:
+    # Backbone
+    backbone_model_name: "STRes16UNet34C"
+    conv1_kernel_size: 3
+    dilations: [1 1 1 1]
+
+training:
+  batch_size: 3
+  gpus: 2
+
+  use_wandb: False
+  wandb:
+    project: "TSGrasp"
+    experiment: "res16_34c_kern7"
+    notes: "Run with Res16UNet34C and conv1_kernel_size 7, 01/03/2021."
