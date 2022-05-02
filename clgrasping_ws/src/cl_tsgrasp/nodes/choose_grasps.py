@@ -106,7 +106,7 @@ def publish_goal_callback(msg):
         grasp_lpf.update(world_poses, confs)
 
     best_pose_world_frame = grasp_lpf.best_grasp
-    final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='panda_link0')
+    final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='world')
 
     final_goal_pose_pub.publish(final_goal_pose)
 
