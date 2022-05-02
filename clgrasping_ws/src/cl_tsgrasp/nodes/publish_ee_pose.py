@@ -11,7 +11,7 @@ tf = TransformFrames()
 
 def publish_ee_pose():
     try:
-        ee_tf = tf.get_transform(source_frame="panda_hand", target_frame="panda_link0")
+        ee_tf = tf.get_transform(source_frame="ee_link", target_frame="world")
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
         return # no link yet
 
