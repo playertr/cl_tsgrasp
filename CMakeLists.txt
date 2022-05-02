@@ -2,7 +2,13 @@ cmake_minimum_required(VERSION 3.0.2)
 project(cl_tsgrasp)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+add_compile_options(-std=c++11)
+
+# Warnings
+add_definitions(-W -Wall -Wextra
+  -Wwrite-strings -Wunreachable-code -Wpointer-arith
+  -Winit-self -Wredundant-decls
+  -Wno-unused-parameter -Wno-unused-function)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -13,10 +19,14 @@ find_package(catkin REQUIRED COMPONENTS
     geometry_msgs
     message_generation
     actionlib_msgs
+    roscpp
+    genmsg
+    moveit_grasps
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+find_package(OpenMP)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -119,7 +129,8 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
-# ${catkin_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
+  moveit_grasps/include
 )
 
 ## Declare a C++ library
@@ -136,6 +147,9 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/cl_tsgrasp_node.cpp)
+add_executable(kin_feas_filter
+  nodes/cpp/src/kin_feas_filter.cpp
+)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -151,6 +165,16 @@ include_directories(
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
+target_link_libraries(kin_feas_filter
+  ${catkin_LIBRARIES}
+)
+# Add threading support with OpenMP
+set_target_properties(kin_feas_filter
+  PROPERTIES COMPILE_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}"
+)
+set_target_properties(kin_feas_filter
+  PROPERTIES LINK_FLAGS "${OpenMP_CXX_FLAGS}"
+)
 
 #############
 ## Install ##
