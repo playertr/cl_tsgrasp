@@ -8,6 +8,7 @@ from spawn_model import ObjectDataset
 from gazebo_msgs.srv import DeleteModel, SpawnModel
 import tf.transformations
 from motion import Mover
+import os
 
 ## constants
 
@@ -33,7 +34,7 @@ class SpawnNewItem(smach.State):
         smach.State.__init__(self, outcomes=['spawned_new_item'])
 
         self.obj_ds = ObjectDataset(
-            dataset_dir="/home/playert/Research/dataset",
+            dataset_dir=os.environ['NN_DATASET_DIR'],
             split="train"
         )
         self.delete_model = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)

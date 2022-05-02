@@ -1,8 +1,7 @@
 try:
     # tsgrasp dependencies
-    import sys
-    from typing import List
-    sys.path.append("/home/playert/Research/cl_grasping/clgrasping_ws/src/cl_tsgrasp/")
+    import sys, os
+    sys.path.append(os.environ['CL_TSGRASP_PKG_ROOT'])
     from nn.load_model import load_model
 
     # ROS dependencies
@@ -25,6 +24,7 @@ try:
     import math
     import MinkowskiEngine as ME
     from pytorch3d.ops import sample_farthest_points
+    from typing import List
     # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
 except ImportError as e:
     print(e)
