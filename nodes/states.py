@@ -300,7 +300,7 @@ class OpenJaws(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state OPEN_JAWS')
-        success = self.mover.go_gripper(np.array([0.04, 0.04]))
+        success = self.mover.go_gripper(np.array([0.03]))
         return 'jaws_open' if success else 'jaws_not_open'
 
 ## Close Jaws State
@@ -312,7 +312,7 @@ class CloseJaws(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state CLOSE_JAWS')
-        success = self.mover.go_gripper(np.array([0.0, 0.0]))
+        success = self.mover.go_gripper(np.array([0.0]))
         return 'jaws_closed' if success else 'jaws_not_closed'
 
 ## Reset Position State
