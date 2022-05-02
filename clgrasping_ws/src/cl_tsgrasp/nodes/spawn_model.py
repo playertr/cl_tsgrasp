@@ -1,4 +1,4 @@
-#! /home/tim/anaconda3/envs/tsgrasp/bin/python
+#! /home/playert/miniconda3/envs/tsgrasp/bin/python
 
 # Script to spawn models in gazebo given an OBJ path and inertial properties
 # from dataclasses import dataclass
@@ -173,8 +173,8 @@ if __name__ == "__main__":
     spawn_model = rospy.ServiceProxy("gazebo/spawn_sdf_model", SpawnModel)
 
     obj = get_obj(
-        '/home/tim/Research/tsgrasp/data/dataset/train/h5/Xbox_e9f575a666fc26aeeb6dfb094ca5145_0.00019886029112129727.h5',
-        mesh_dir='/home/tim/Research/tsgrasp/data/dataset/train/meshes'
+        '/home/playert/Research/tsgrasp/data/dataset/train/h5/Xbox_e9f575a666fc26aeeb6dfb094ca5145_0.00019886029112129727.h5',
+        mesh_dir='/home/playert/Research/tsgrasp/data/dataset/train/meshes'
     )
 
     xml = obj.to_sdf()
