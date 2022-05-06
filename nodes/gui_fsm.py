@@ -14,6 +14,7 @@ rospy.loginfo("Waiting for services.")
 rospy.wait_for_service("/bravo/plan_kinematic_path") # wait for moveit to be up and running
 rospy.wait_for_service("/gazebo/delete_model")
 rospy.wait_for_service("/gazebo/spawn_sdf_model")
+rospy.wait_for_service('/bravo/apply_planning_scene') # just to make sure we can add to the planningscene in motion.py
 
 # Start end-effector motion client
 mover = Mover()
@@ -71,9 +72,9 @@ with grasp_sm:
         }
     )
 
-open_loop_grasp_sm = smach.StateMachine(outcomes=['GRASP_SUCCESS', 'GRASP_FAIL'])
-open_loop_grasp_sm.userdata.final_goal_pose_input = None
-with open_loop_grasp_sm:
+open_loop_servo_grasp_sm = smach.StateMachine(outcomes=['GRASP_SUCCESS', 'GRASP_FAIL'])
+open_loop_servo_grasp_sm.userdata.final_goal_pose_input = None
+with open_loop_servo_grasp_sm:
     # Add states to the container
     smach.StateMachine.add(
         'OPEN_JAWS',
@@ -87,7 +88,7 @@ with open_loop_grasp_sm:
         'GO_TO_ORBITAL_POSE',
         GoToOrbitalPose(mover),
         transitions={
-            'in_orbital_pose': 'GO_TO_FINAL_POSE',
+            'in_orbital_pose': 'SERVO_TO_FINAL_POSE',
             'not_in_orbital_pose': 'GRASP_FAIL'
         },
         remapping={
@@ -95,7 +96,7 @@ with open_loop_grasp_sm:
         }
     )
     smach.StateMachine.add(
-        'GO_TO_FINAL_POSE',
+        'SERVO_TO_FINAL_POSE',
         ServoToFinalPose(), #GoToFinalPose(mover),
         transitions={
             'in_grasp_pose': 'CLOSE_JAWS',
@@ -105,20 +106,27 @@ with open_loop_grasp_sm:
             'final_goal_pose_input':'final_goal_pose'
         }
     )
+    # smach.StateMachine.add(
+    #     'ALLOW_HAND_COLLISIONS',
+    #     AllowHandCollisions(mover),
+    #     transitions={
+    #         'hand_collisions_allowed': 'CLOSE_JAWS',
+    #         'hand_collisions_not_allowed': 'GRASP_FAIL'
+    #     }
+    # )
     smach.StateMachine.add(
         'CLOSE_JAWS',
         CloseJaws(mover),
         transitions={
-            'jaws_closed': 'ALLOW_HAND_COLLISIONS',
+            'jaws_closed': 'DELAY',
             'jaws_not_closed': 'GRASP_FAIL'
         }
     )
     smach.StateMachine.add(
-        'ALLOW_HAND_COLLISIONS',
-        AllowHandCollisions(mover),
+        'DELAY',
+        Delay(3),
         transitions={
-            'hand_collisions_allowed': 'RESET_POS',
-            'hand_collisions_not_allowed': 'GRASP_FAIL'
+            'delayed': 'RESET_POS'
         }
     )
     smach.StateMachine.add(
@@ -129,14 +137,81 @@ with open_loop_grasp_sm:
             'position_not_reset': 'GRASP_FAIL'
         }
     )
-    smach.StateMachine.add(
-        'DISALLOW_HAND_COLLISIONS',
-        DisallowHandCollisions(mover),
-        transitions={
-            'hand_collisions_disallowed': 'GRASP_SUCCESS',
-            'hand_collisions_not_disallowed': 'GRASP_FAIL'
-        }
-    )
+    # smach.StateMachine.add(
+    #     'DISALLOW_HAND_COLLISIONS',
+    #     DisallowHandCollisions(mover),
+    #     transitions={
+    #         'hand_collisions_disallowed': 'GRASP_SUCCESS',
+    #         'hand_collisions_not_disallowed': 'GRASP_FAIL'
+    #     }
+    # )
+
+# open_loop_grasp_sm = smach.StateMachine(outcomes=['GRASP_SUCCESS', 'GRASP_FAIL'])
+# open_loop_grasp_sm.userdata.final_goal_pose_input = None
+# with open_loop_grasp_sm:
+#     # Add states to the container
+#     smach.StateMachine.add(
+#         'OPEN_JAWS',
+#         OpenJaws(mover),
+#         transitions={
+#             'jaws_open': 'GO_TO_ORBITAL_POSE',
+#             'jaws_not_open': 'GRASP_FAIL'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'GO_TO_ORBITAL_POSE',
+#         GoToOrbitalPose(mover),
+#         transitions={
+#             'in_orbital_pose': 'ALLOW_HAND_COLLISIONS',
+#             'not_in_orbital_pose': 'GRASP_FAIL'
+#         },
+#         remapping={
+#             'final_goal_pose':'final_goal_pose'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'ALLOW_HAND_COLLISIONS',
+#         AllowHandCollisions(mover),
+#         transitions={
+#             'hand_collisions_allowed': 'GO_TO_FINAL_POSE',
+#             'hand_collisions_not_allowed': 'GRASP_FAIL'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'GO_TO_FINAL_POSE',
+#         ServoToFinalPose(), #GoToFinalPose(mover),
+#         transitions={
+#             'in_grasp_pose': 'CLOSE_JAWS',
+#             'not_in_grasp_pose': 'GRASP_FAIL'
+#         },
+#         remapping={
+#             'final_goal_pose_input':'final_goal_pose'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'CLOSE_JAWS',
+#         CloseJaws(mover),
+#         transitions={
+#             'jaws_closed': 'SERVO_TO_FINAL_POSE',
+#             'jaws_not_closed': 'GRASP_FAIL'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'RESET_POS',
+#         ResetPos(mover),
+#         transitions={
+#             'position_reset': 'GRASP_SUCCESS',
+#             'position_not_reset': 'GRASP_FAIL'
+#         }
+#     )
+#     smach.StateMachine.add(
+#         'DISALLOW_HAND_COLLISIONS',
+#         DisallowHandCollisions(mover),
+#         transitions={
+#             'hand_collisions_disallowed': 'GRASP_SUCCESS',
+#             'hand_collisions_not_disallowed': 'GRASP_FAIL'
+#         }
+#     )
 
 reset_pos = ResetPos(mover)
 spawn_new_item = SpawnNewItem()
@@ -148,7 +223,7 @@ terminal_homing = TerminalHoming()
 close_jaws = CloseJaws(mover)
 go_to_final_pose = GoToFinalPose(mover)
 servo_to_final_pose = ServoToFinalPose()
-grasp_open_loop = open_loop_grasp_sm
+grasp_open_loop = open_loop_servo_grasp_sm
 allow_hand_collisions = AllowHandCollisions(mover)
 disallow_hand_collisions = DisallowHandCollisions(mover)
 
