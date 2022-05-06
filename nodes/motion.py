@@ -35,7 +35,7 @@ def all_close(goal, actual, tolerance):
     return True
 
 class Mover:
-    """Wrapper around MoveIt functionality for the panda arm."""
+    """Wrapper around MoveIt functionality for the arm."""
 
     arm_move_group_cmdr: moveit_commander.MoveGroupCommander
     arm_robot_cmdr: moveit_commander.RobotCommander
@@ -49,35 +49,41 @@ class Mover:
         moveit_commander.roscpp_initialize(sys.argv)
         self.arm_group_name = "arm"
         self.grasping_group_name = "hand"
-        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description", ns="bravo")
+        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description")
         self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name, robot_description="/bravo/robot_description")
-        self.scene = moveit_commander.PlanningSceneInterface()
-        self.gripper_pub = rospy.Publisher('/bravo/hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
-        # rospy.init_node("move_group_python", anonymous=True) # node for modifying PlanningScene
 
-        self.arm_move_group_cmdr.set_planner_id("RRTConnectkConfigDefault")
+        self.scene = moveit_commander.PlanningSceneInterface(synchronous=True) # might break the non-blocking promise
+        self.gripper_pub = rospy.Publisher('/bravo/hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
+        self.add_ground_plane_to_planning_scene()
+
+        self.arm_move_group_cmdr.set_planner_id("RRTConnect")
+
+    def add_ground_plane_to_planning_scene(self):
+        """Add a box object to the PlanningScene so that collisions with the 
+        hand are ignored. Otherwise, no collision-free trajectories can be found 
+        after an object is picked up."""
+
+        eef_link = self.arm_move_group_cmdr.get_end_effector_link()
+
+        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose.header.frame_id = self.arm_robot_cmdr.get_planning_frame()
+        box_pose.pose.orientation.w = 1.0
+        box_pose.pose.position.z = -0.5  # above the hand frame
+        box_name = "ground_plane"
+        self.scene.add_box(box_name, box_pose, size=(3, 3, 1))
 
     def go_joints(self, joints: np.ndarray, wait: bool = True):
         """Move robot to the given 7-element joint configuration.
 
         Args:
-            joints (np.ndarray): joint angles for panda
+            joints (np.ndarray): joint angles
             wait (bool): whether to block until finished 
         """
+        joint_positions = self.arm_move_group_cmdr.get_current_joint_values() # ensure current
         plan = self.arm_move_group_cmdr.go(joints, wait=wait)
         self.arm_move_group_cmdr.stop()
         return plan
 
-    # def go_gripper(self, pos: np.ndarray, wait: bool = True):
-    #     """Move the gripper fingers to the two given positions.
-
-    #     Args:
-    #         pos (np.ndarray): gripper positions, in meters from center
-    #         wait (bool): whether to block until finished
-    #     """
-    #     plan = self.gripper.go(pos, wait=wait)
-    #     self.gripper.stop()
-    #     return plan
 
     def go_gripper(self, pos: np.ndarray, wait: bool = True):
         """Move the gripper fingers to the two given positions.
@@ -86,10 +92,6 @@ class Mover:
             pos (np.ndarray): gripper positions, in meters from center
             wait (bool): whether to block until finished
         """
-        # publisher = rospy.Publisher('/panda_hand_controller/command', data_class=Float64MultiArray, queue_size=1)
-
-        # publisher.publish(Float64MultiArray(data=pos))
-
         jt = JointTrajectory()
         jt.joint_names = ['bravo_axis_a']
         jt.header.stamp = rospy.Time.now()
@@ -112,7 +114,7 @@ class Mover:
         """
 
         self.arm_move_group_cmdr.set_pose_target(pose)
-        self.arm_move_group_cmdr.set_goal_tolerance(0.1)
+        # self.arm_move_group_cmdr.set_goal_tolerance(0.1)
         plan = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
@@ -143,7 +145,7 @@ class Mover:
         box_pose = geometry_msgs.msg.PoseStamped()
         box_pose.header.frame_id = "ee_link"
         box_pose.pose.orientation.w = 1.0
-        box_pose.pose.position.z = 0.11  # above the panda_hand frame
+        box_pose.pose.position.z = 0.11  # above the hand frame
         self.box_name = "hand_collision_box"
         self.scene.add_box(self.box_name, box_pose, size=(0.075, 0.075, 0.075))
 
