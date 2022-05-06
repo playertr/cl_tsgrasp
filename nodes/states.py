@@ -15,9 +15,11 @@ import os
 # TerminalHoming
 GOAL_PUB_RATE   = 30
 STEP_SPEED      = 1.0
-SUCCESS_RADIUS  = 0.005 # in SE(3) space -- dimensionless
+SUCCESS_RADIUS  = 0.01 # in SE(3) space -- dimensionless
 TIMEOUT         = 8
-LAMBDA          = 0.75*np.array([1, 1, 1, 1, 1, 1])
+LAMBDA          = 1.5*np.array([1, 1, 1, 1, 1, 1])
+MIN_VEL         = 0.1
+MIN_DIST        = 0.001
 
 # SpawnNewItem
 WORKSPACE_BOUNDS    = [[-0.1, -0.3], [0.1, -0.1]]
@@ -49,7 +51,7 @@ class SpawnNewItem(smach.State):
         z = TABLE_HEIGHT
         yaw = np.random.uniform(0, 2*np.pi)
 
-        x, y, yaw = 0, 0, 0 # test
+        x, y, yaw = 0.4, -0.3, 0 # test
 
         q = tf.transformations.quaternion_from_euler(0, 0, yaw)
         return Pose(
@@ -109,6 +111,7 @@ class GoToOrbitalPose(smach.State):
         if self._orbital_pose is None:
             rospy.loginfo('Orbital pose has not been initialized.')
             return 'not_in_orbital_pose'
+        rospy.loginfo(f"Orbital pose is:\n{self._orbital_pose}")
 
         userdata.final_goal_pose = self._final_goal_pose
         success = self.mover.go_ee_pose(self._orbital_pose)
@@ -137,6 +140,26 @@ class GoToFinalPose(smach.State):
         success = self.mover.go_ee_pose(self._final_pose)
         return 'in_grasp_pose' if success else 'not_in_grasp_pose'
 
+# GoToFinalPose state
+class GoToOriginalFinalPose(smach.State):
+    _final_pose = None 
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
+        self.mover = mover
+
+    def _goal_pose_cb(self, msg):
+        self._final_pose = msg
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state GO_TO_FINAL_POSE')
+        if self._final_pose is None:
+            rospy.loginfo('Final goal pose has not been initialized.')
+            return 'not_in_grasp_pose'
+
+        success = self.mover.go_ee_pose(self._final_pose)
+        return 'in_grasp_pose' if success else 'not_in_grasp_pose'
+
 ## Terminal homing state
 class TerminalHoming(smach.State):
     _ee_pose = None
@@ -152,7 +175,7 @@ class TerminalHoming(smach.State):
             name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
-            name='/servo_server/delta_twist_cmds', 
+            name='/bravo/servo_server/delta_twist_cmds', 
             data_class=numpy_msg(TwistStamped), queue_size=1)
 
     def _ee_pose_cb(self, msg):
@@ -176,7 +199,8 @@ class TerminalHoming(smach.State):
         p1 = self._posestamped_to_arr(ee_pose.pose)
         p2 = self._posestamped_to_arr(final_goal_pose.pose)
 
-        efforts = LAMBDA * (p2 - p1)
+        err = p2 - p1
+        efforts = LAMBDA * (err) + MIN_VEL * np.sign(err) * (np.abs(err) > MIN_DIST)
 
         twist = TwistStamped()
         twist.header = ee_pose.header
@@ -203,38 +227,37 @@ class TerminalHoming(smach.State):
 
         # update goal pose at fixed rate
         # note: an asynchronous callback may be better.
-        
+        in_grasp_pose = False
         rate = rospy.Rate(GOAL_PUB_RATE)
-        while se3_dist(self._ee_pose.pose, self._goal_pose.pose) > SUCCESS_RADIUS:
-            if rospy.Time.now() - start_time > rospy.Duration(TIMEOUT):
-                return 'not_in_grasp_pose'
+        while rospy.Time.now() - start_time < rospy.Duration(TIMEOUT):
+            in_grasp_pose = se3_dist(self._ee_pose.pose, self._goal_pose.pose) < SUCCESS_RADIUS
+            
+            if in_grasp_pose:
+                break
 
             self._servo_twist_pub.publish(
                 self._compute_twist(self._ee_pose, self._goal_pose)
             )
             rate.sleep()
 
-        return 'in_grasp_pose'
+        # send a zero twist to help moveit_servo finish
+        self._servo_twist_pub.publish(
+                self._compute_twist(self._ee_pose, self._ee_pose) # zero twist
+        )
+
+        return 'in_grasp_pose' if in_grasp_pose else 'not_in_grasp_pose'
 
 class ServoToFinalPose(TerminalHoming):
     """Just like TerminalHoming, but the target never moves after being set. Also accepts the target as a userdata element."""
 
     def __init__(self):
         smach.State.__init__(self, outcomes=['in_grasp_pose', 'not_in_grasp_pose'], input_keys=['final_goal_pose_input'])
-
-        goal_pose_sub = rospy.Subscriber(
-            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
-            callback=self._goal_pose_cb, queue_size=1)
         ee_pose_sub = rospy.Subscriber(
             name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
-            name='/servo_server/delta_twist_cmds', 
+            name='/bravo/servo_server/delta_twist_cmds', 
             data_class=numpy_msg(TwistStamped), queue_size=1)
-
-    def _goal_pose_cb(self, msg):
-        if self._goal_pose is None:
-            self._goal_pose = msg
 
     def execute(self, userdata):
         if userdata.final_goal_pose_input is not None:
@@ -255,7 +278,7 @@ class ServoToOrbitalPose(TerminalHoming):
             name='/tsgrasp/ee_pose', 
             data_class=PoseStamped, callback=self._ee_pose_cb, queue_size=1)
         self._servo_twist_pub = rospy.Publisher(
-            name='/servo_server/delta_twist_cmds', 
+            name='/bravo/servo_server/delta_twist_cmds', 
             data_class=numpy_msg(TwistStamped), queue_size=1)
 
     def _goal_pose_cb(self, msg):
@@ -325,5 +348,5 @@ class ResetPos(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state RESET_POSITION')
-        success = self.mover.go_named_group_state('rest')
+        success = self.mover.go_named_group_state('drawn_back')
         return 'position_reset' if success else 'position_not_reset'
