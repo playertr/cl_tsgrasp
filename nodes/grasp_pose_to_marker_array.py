@@ -1,13 +1,16 @@
 #! /usr/bin/env python3
 # Read in the predicted grasp poses and publish markers to visualize.
-# Each marker shows the grasp pose and the quality relative to the other reported potential grasp poses.
+# Takes in the topic "grasps" and publishes a MarkerArray to "grasp_pose_markers".
+# Accepts an optional argument, "--color", documented in argparse help.
 
 import rospy
 from cl_tsgrasp.msg import Grasps
 from visualization_msgs.msg import Marker, MarkerArray
 from matplotlib import cm
+import argparse
 
-marker_array_pub = rospy.Publisher('/tsgrasp/grasp_pose_markers', MarkerArray, queue_size=100)
+color = 'confs'
+marker_array_pub = rospy.Publisher('grasp_pose_markers', MarkerArray, queue_size=100)
     
 def gripper_marker():
     marker = Marker()
@@ -24,7 +27,8 @@ def gripper_marker():
     return marker
 
 def poses_cb(msg):
-    
+    global color
+
     if len(msg.confs) == 0: return
     
     viridis = cm.get_cmap('viridis', 12)
@@ -39,11 +43,19 @@ def poses_cb(msg):
     for i, pose in enumerate(msg.poses[:500]):
         marker = gripper_marker()
         marker.id = i
-        marker.color.a = 0.5
-        color = cmap(msg.confs[i])
-        marker.color.r = color[0]
-        marker.color.g = color[1]
-        marker.color.b = color[2]
+
+        if color == 'confs':
+            marker.color.a = 0.5
+            color = cmap(msg.confs[i])
+            marker.color.r = color[0]
+            marker.color.g = color[1]
+            marker.color.b = color[2]
+        else:
+            marker.color.r = color[0]
+            marker.color.g = color[1]
+            marker.color.b = color[2]
+            marker.color.a = color[3]
+
         marker.header = msg.header
         marker.pose.orientation = pose.orientation
         marker.pose.position = pose.position
@@ -51,8 +63,19 @@ def poses_cb(msg):
 
     marker_array_pub.publish(marker_array)
 
-rospy.init_node('publish_grasp_markers')
-rospy.Subscriber('/tsgrasp/grasps', Grasps, poses_cb, queue_size=1)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
 
-rospy.loginfo('Ready to grasp markers.')
-rospy.spin()
+    parser.add_argument("--color", type=str,
+                        help="Which color of marker to make. Setting to 'confs' specifies that markers should be colormapped by grasp confidence. Setting to '(R, G, B, A)' sets markers to the given color. R, G, and B are floats in the range [0, 255], and A is in [0, 1].", default='confs')
+
+    args, unknown = parser.parse_known_args()
+
+    if args.color != 'confs':
+        color = eval(args.color) # bit of an antipattern but I'm sure this won't come back to bite me
+        
+    rospy.init_node('publish_grasp_markers')
+    rospy.Subscriber('grasps', Grasps, poses_cb, queue_size=1)
+
+    rospy.loginfo('Ready to grasp markers.')
+    rospy.spin()
