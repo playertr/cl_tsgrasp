@@ -4,6 +4,6 @@ kin_feas_filter:
   move_group_name: arm
   input_grasps_topic: tsgrasp/grasps
   output_grasps_topic: tsgrasp/grasps_filtered
-  num_threads: 2
+  num_threads: 6
   # setting to a number < 1 or greater than omp_get_max_threads() sets to max
   
