@@ -34,13 +34,14 @@ except ImportError as e:
 ## global constants
 QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
-GRIPPER_DEPTH   = 0.1034
+GRIPPER_DEPTH   = 0.1366 # 0.1034 for panda
 CONF_THRESHOLD  = 0 #0.5
 TOP_K           = 400
 BOUNDS          = torch.Tensor([[-2, -2, 0], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
+
 
 ## load Pytorch Lightning network
 device = torch.device('cuda')
@@ -310,14 +311,19 @@ def transform_to_camera_frame(pts, poses):
     return pts
 
 def identify_grasps(pts):
-    outputs = infer_grasps(pl_model, pts, grid_size=pl_model.model.grid_size)
 
-    class_logits, baseline_dir, approach_dir, grasp_offset, positions = outputs
+    try:
+        outputs = infer_grasps(pl_model, pts, grid_size=pl_model.model.grid_size)
 
-    # only retain the information from the latest (-1) frame
-    grasps = build_6dof_grasps(positions, baseline_dir, approach_dir, grasp_offset)
-    grasps = transform_to_eq_pose(grasps)
-    confs = torch.sigmoid(class_logits)
+        class_logits, baseline_dir, approach_dir, grasp_offset, positions = outputs
+
+        grasps = build_6dof_grasps(positions, baseline_dir, approach_dir, grasp_offset)
+
+        confs = torch.sigmoid(class_logits)
+    except Exception as e:
+        print(e)
+        breakpoint()
+        print('debug')
 
     return grasps, confs
 
@@ -349,6 +355,50 @@ def filter_grasps(grasps, confs):
 
     return grasps, confs
 
+def ensure_grasp_y_axis_upward(grasps: torch.Tensor) -> torch.Tensor:
+    """Flip grasps with their Y-axis pointing downwards by 180 degrees about the wrist (z) axis, 
+        because we have mounted the camera on the wrist in the direction of the Y axis and don't 
+        want it to be scraped off on the table.
+
+    Args:
+        grasps (torch.Tensor): (N, 4, 4) grasp pose tensor
+
+    Returns:
+        torch.Tensor: (N, 4, 4) grasp pose tensor with some grasps flipped
+    """
+
+    N = len(grasps)
+
+    # The strategy here is to create a  Boolean tensor for whether
+    # to flip the grasp. From the way we mounted our camera, we know that 
+    # we'd prefer grasps with X axes that point up in the camera frame
+    # (along the -Y axis). Therefore, we flip the rotation matrices of the
+    # grasp poses that don't do that.
+
+    # For speed, the flipping is done by allocating two (N, 4, 4) transformation
+    # matrices: one for flipping (flips) and one for do-nothing (eyes). We select
+    # between them with torch.where and perform matrix multiplication. This avoids 
+    # a for loop (~100X speedup) at the expense of a bit of memory and obfuscation.
+
+    y_axis = torch.tensor([0, 1, 0], dtype=torch.float32, device=device)
+    flip_about_z = torch.tensor([
+                [-1, 0, 0],
+                [0, -1, 0],
+                [0, 0, 1]
+            ], dtype=torch.float32, device=device)
+
+    needs_flipping = grasps[:, :3, 1] @ y_axis > 0
+    needs_flipping = needs_flipping.reshape(N, 1, 1).expand(N, 3, 3)
+
+    eyes = torch.eye(3).repeat((N, 1, 1)).to(device)
+    flips = flip_about_z.repeat((N, 1, 1)).to(device)
+
+    tfs = torch.where(needs_flipping, flips, eyes)
+
+    grasps[:,:3,:3] = torch.bmm(grasps[:,:3,:3], tfs)
+    return grasps
+
+    
 @torch.inference_mode()
 def find_grasps():
     global queue, device, queue_mtx
@@ -386,28 +436,34 @@ def find_grasps():
         # Remove points that are outside of the boundaries in the global frame.
         with TimeIt('Bound Point Cloud'):
             pts             = bound_point_cloud(pts, poses)
-            if pts is None: return
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Downsample the points with uniform probability.
         with TimeIt('Downsample Points'):
             pts             = downsample_xyz(pts, PTS_PER_FRAME)
-            if pts is None: return
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Transform the points into the frame of the last camera perspective.
         with TimeIt('Transform to Camera Frame'):
             pts             = transform_to_camera_frame(pts, poses)
-            if pts is None or len(pts[-1]) == 0: return
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Run the NN to identify grasp poses and confidences.
         with TimeIt('Find Grasps'):
             grasps, confs   = identify_grasps(pts)
             all_confs       = confs.clone() # keep the pointwise confs for plotting later
 
-        # Filter the grasps by thresholding and furthest-point sampling.
+        # Filter the grasps by thresholding and (optionally) furthest-point sampling.
         with TimeIt('Filter Grasps'):
             grasps, confs   = filter_grasps(grasps, confs)
 
         if grasps is None: return
+
+        with TimeIt('Ensure X Axis Upward'):
+            grasps = ensure_grasp_y_axis_upward(grasps)
+
+        with TimeIt('Transform to eq pose'):
+            grasps = transform_to_eq_pose(grasps)
         
         with TimeIt('Publish Grasps'):
         
@@ -425,7 +481,7 @@ def find_grasps():
 
             grasps_msg = Grasps()
             grasps_msg.poses = [q_v_to_pose(q, v) for q, v in zip(qs, vs)]
-            grasps_msg.confs = confs
+            grasps_msg.confs = confs.tolist()
             grasps_msg.header = copy.copy(header)
             grasp_pub.publish(grasps_msg)
 
@@ -477,4 +533,5 @@ r = rospy.Rate(5)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
+
     r.sleep()
