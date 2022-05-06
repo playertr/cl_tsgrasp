@@ -87,18 +87,18 @@ def publish_goal_callback(msg):
     world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
 
     # allow only top-down-ish grasps (for now)
-    # if True:
-    #     z_hat = np.array([0, 0, 1])
-    #     valid_idcs = [
-    #         i for (i, p) in enumerate(world_poses)
-    #         if quaternion_matrix(np.array(
-    #             [p.pose.orientation.x, p.pose.orientation.y, p.pose.orientation.z, p.pose.orientation.w]))[:3,2].dot(z_hat) < -0.6
-    #     ]
+    if True:
+        z_hat = np.array([0, 0, 1])
+        valid_idcs = [
+            i for (i, p) in enumerate(world_poses)
+            if quaternion_matrix(np.array(
+                [p.pose.orientation.x, p.pose.orientation.y, p.pose.orientation.z, p.pose.orientation.w]))[:3,2].dot(z_hat) < 0
+        ]
 
-    #     confs = [confs[i] for i in valid_idcs]
-    #     poses = [poses[i] for i in valid_idcs]
-    #     world_poses = [world_poses[i] for i in valid_idcs]
-    #     if len(confs) == 0: return
+        confs = [confs[i] for i in valid_idcs]
+        poses = [poses[i] for i in valid_idcs]
+        world_poses = [world_poses[i] for i in valid_idcs]
+        if len(confs) == 0: return
 
     if grasp_lpf is None:
         grasp_lpf = GraspPoseLPF(world_poses, confs)
