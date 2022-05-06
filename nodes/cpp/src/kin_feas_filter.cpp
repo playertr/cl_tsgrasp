@@ -172,8 +172,6 @@ int main(int argc, char **argv)
   error += !rosparam_shortcuts::get(parent_name, rpnh, "num_threads", num_threads);
   rosparam_shortcuts::shutdownIfError(parent_name, error);
 
-  ROS_ERROR_STREAM(timeout);
-  
   planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(robot_description_name);
   const robot_model::RobotModelConstPtr robot_model = planning_scene_monitor->getRobotModel();
   const robot_model::JointModelGroup* arm_jmg = robot_model->getJointModelGroup(move_group_name);
