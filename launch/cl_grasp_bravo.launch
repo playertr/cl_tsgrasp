@@ -10,11 +10,16 @@
         default="true"
         doc="Whether to start a teleop_twist_joy node to accept joystick input." />
 
+    <arg name="with_camera"
+        default="true"
+        doc="Whether to include a wrist-mounted depth camera in the URDF."
+    />
+
     <!-- Load the URDF onto the parameter server -->
     <param name="bravo/robot_description" 
-        command="xacro $(find bpl_bravo_description_real)/urdf/bravo_7_example.urdf.xacro"/>
+        command="xacro '$(find bpl_bravo_description_real)/urdf/bravo_7_example.urdf.xacro' with_camera:=$(arg with_camera)"/>
 
-
+    <!-- Real Bravo - - not Gazebo -->
     <group if="$(eval arg('simulated') == false)">
         <!-- Load driver config to the parameter server -->
         <rosparam command="load" 
@@ -46,29 +51,25 @@
 
     </group>
 
+    <!-- Simulated Bravo in Gazebo -->
     <group if="$(eval arg('simulated') == true)">
 
         <arg name="initial_joint_positions"
             doc="Initial joint configuration of the panda. Specify as a list of name/value pairs in form of '-J [name-of-joint] [value-in-rad]'. Default is a 90 degree bend in the elbow"
-            default="-J bravo_axis_b 1.5708
-                        -J bravo_axis_c 1.3161
-                        -J bravo_axis_d 3.15
-                        -J bravo_axis_e 0.671
-                        -J bravo_axis_f 2.0903
-                        -J bravo_axis_g 3.14159" />
-        <!-- -J bravo_axis_f 2.0903 -->
+            default="   -J bravo_axis_b 1.9950388808824293
+                        -J bravo_axis_c 1.4678582805893576
+                        -J bravo_axis_d 0.5450578589117114
+                        -J bravo_axis_e 1.418630073444958
+                        -J bravo_axis_f 2.850500116348798
+                        -J bravo_axis_g 2.3335753665456362" />
 
         <!-- Launch Gazebo-->
         <include file="$(find gazebo_ros)/launch/empty_world.launch">
             <arg name="gui" value="true" />
             <arg name="paused" value="true"/>
             <arg name="debug" value="false"/>
-            <arg name="verbose" value="true"/>
+            <arg name="verbose" value="false"/>
         </include>
-
-        <!-- Load the Gazebo-enriched URDF onto the parameter server -->
-        <param name="bravo/robot_description" 
-            command="xacro $(find bpl_bravo_description_real)/urdf/bravo_7_example.urdf.xacro"/>
 
         <!-- Spawn the robot model -->
         <node name="bravo_model_spawner" 
@@ -148,8 +149,11 @@
         <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
     </node>
 
+    <!-- Kinematic feasibility filter -->
+    <!-- The IKFast plugin tends to get greedy and take up 8 CPU cores. It does fine with only one.
+    The `taskset` command limits the cores it can access at the OS level (a hack). -->
     <rosparam file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
-    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen">
+    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen" launch-prefix="taskset --cpu-list 1 ">
         <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
         <remap from="tsgrasp/grasps_filtered" to="tsgrasp/grasps" />
     </node>
@@ -171,8 +175,20 @@
         args="/tsgrasp/grasps /tsgrasp/grasps_pose geometry_msgs/PoseArray 'geometry_msgs.msg.PoseArray(header=m.header, poses=m.poses)' --import geometry_msgs --wait-for-start"/>
     
     <!-- Node to publish grasp poses for visualization -->
-    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers" />
+    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers" launch-prefix="xterm -hold -e" args='--color "confs"' >
+        <remap from="grasps" to="tsgrasp/grasps" />
+        <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers" />
+    </node>
+
+    <!-- show invalid grasps in red -->
+    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers_unfiltered" launch-prefix="xterm -hold -e" args='--color "(255.0, 0.0, 0.0, 0.05)"' >
+        <remap from="grasps" to="tsgrasp/grasps_unfiltered" />
+        <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers_unfiltered" />
+    </node>
     
-    <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e "/>
+    <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e"/>
+    <!-- launch-prefix="gnome-terminal command"/> -->
+
+    <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure"/>
 
   </launch>
