@@ -12,8 +12,8 @@ rospy.init_node('smach_state_machine')
 # (located here because State.__init__ can't block)
 rospy.loginfo("Waiting for services.")
 rospy.wait_for_service("/bravo/plan_kinematic_path") # wait for moveit to be up and running
-rospy.wait_for_service("/gazebo/delete_model")
-rospy.wait_for_service("/gazebo/spawn_sdf_model")
+# rospy.wait_for_service("/gazebo/delete_model")
+# rospy.wait_for_service("/gazebo/spawn_sdf_model")
 rospy.wait_for_service('/bravo/apply_planning_scene') # just to make sure we can add to the planningscene in motion.py
 
 # Start end-effector motion client
