@@ -28,7 +28,7 @@ try:
     # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
 except ImportError as e:
     print(e)
-    print("roslaunch must invoke this script using the NN_CONDA_PATH specified in config/computer_setup.yaml:")
+    print("roslaunch must invoke this script using the NN_CONDA_PATH specified in config/machine_setup.bash:")
     print("\t\t")
 
 ## global constants
