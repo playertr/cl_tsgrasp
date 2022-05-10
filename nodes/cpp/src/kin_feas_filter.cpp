@@ -50,7 +50,7 @@ GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr plannin
   {
     num_threads_ = num_threads;
   }
-  ROS_INFO_STREAM("Set num_threads_ to :" << num_threads_);
+  ROS_INFO_STREAM("Set num_threads_ to: " << num_threads_);
 
   // Create an ik solver for every thread
   for (std::size_t i = 0; i < num_threads_; ++i)
