@@ -115,8 +115,11 @@
     <!-- Start moveit_servo node for cartesian end-effector velocity control -->
     <node ns="bravo" name="servo_server" pkg="moveit_servo" type="servo_server" output="screen" launch-prefix="xterm -hold -e ">
         <rosparam command="load" file="$(find bpl_bravo_moveit_config)/config/bravo_moveit_servo.yaml" />
+        <remap from="/planning_scene_world" to="bravo/move_group/planning_scene_world"/>
+        <remap from="/planning_scene" to="bravo/move_group/planning_scene"/>
+        <remap from="/get_planning_scene" to="bravo/move_group/get_planning_scene"/>
+        <remap from="/monitored_planning_scene" to="monitored_planning_scene"/>
     </node>
-
     <!-- Optionally start a teleop_twist_joy node for a game controller -->
     <group if="$(eval arg('use_controller'))">
     
@@ -153,10 +156,11 @@
     <!-- The IKFast plugin tends to get greedy and take up 8 CPU cores. It does fine with only one.
     The `taskset` command limits the cores it can access at the OS level (a hack). -->
     <rosparam file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
-    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen" launch-prefix="taskset --cpu-list 1 ">
+    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen" launch-prefix="taskset --cpu-list 1 xterm -hold -e">
         <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
         <remap from="tsgrasp/grasps_filtered" to="tsgrasp/grasps" />
     </node>
+
 
     <!-- Node to select goal pose -->
     <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" launch-prefix="xterm -hold -e "/>
@@ -189,6 +193,6 @@
     <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e"/>
     <!-- launch-prefix="gnome-terminal command"/> -->
 
-    <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure"/>
+    <!-- <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure"/> -->
 
   </launch>
