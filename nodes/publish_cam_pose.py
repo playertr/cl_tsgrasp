@@ -11,11 +11,14 @@ ee_pose_pub = rospy.Publisher('/tsgrasp/cam_pose', PoseStamped, queue_size=1)
 tf = TransformFrames()
 
 def publish_cam_pose():
-    try:
-        cam_tf = tf.get_transform(source_frame="camera_depth_optical_frame", target_frame="world")
-    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-        return # no link yet
-    
+    while True:
+        try:
+            cam_tf = tf.get_transform(source_frame="camera_depth_optical_frame", target_frame="world")
+            break
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            rospy.sleep(1)
+            continue # no link yet
+        
     cam_pose = PoseStamped(
         header = cam_tf.header,
         pose = Pose(
