@@ -49,12 +49,12 @@ class Mover:
         moveit_commander.roscpp_initialize(sys.argv)
         self.arm_group_name = "arm"
         self.grasping_group_name = "hand"
-        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="/bravo/robot_description")
-        self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name, robot_description="/bravo/robot_description")
+        self.arm_robot_cmdr = moveit_commander.RobotCommander(robot_description="robot_description")
+        self.arm_move_group_cmdr = moveit_commander.MoveGroupCommander(self.arm_group_name, robot_description="robot_description")
 
         self.scene = moveit_commander.PlanningSceneInterface(synchronous=True) # might break the non-blocking promise
-        self.gripper_pub = rospy.Publisher('/bravo/hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
-        self.add_ground_plane_to_planning_scene()
+        self.gripper_pub = rospy.Publisher('hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
+        # self.add_ground_plane_to_planning_scene()
 
         self.arm_move_group_cmdr.set_planner_id("RRTConnect")
 
@@ -62,8 +62,6 @@ class Mover:
         """Add a box object to the PlanningScene so that collisions with the 
         hand are ignored. Otherwise, no collision-free trajectories can be found 
         after an object is picked up."""
-
-        eef_link = self.arm_move_group_cmdr.get_end_effector_link()
 
         box_pose = geometry_msgs.msg.PoseStamped()
         box_pose.header.frame_id = self.arm_robot_cmdr.get_planning_frame()
@@ -112,8 +110,10 @@ class Mover:
             pose (geometry_msgs.msg.Pose): desired pose for end effector
             wait (bool): whether to block until finished
         """
-
+        # self.arm_move_group_cmdr.set_goal_tolerance(0.01)
+        # self.arm_move_group_cmdr.set_planning_time(10.0)
         self.arm_move_group_cmdr.set_pose_target(pose)
+        print(f"Attempting to go to pose: \n{pose}")
         # self.arm_move_group_cmdr.set_goal_tolerance(0.1)
         plan = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
