@@ -103,13 +103,14 @@ class Mover:
         self.gripper_pub.publish(jt)
         return True
 
-    def go_ee_pose(self, pose: geometry_msgs.msg.Pose, wait: bool = True):
+    def go_ee_pose(self, pose: geometry_msgs.msg.PoseStamped, wait: bool = True):
         """Move the end effector to the given pose.
 
         Args:
             pose (geometry_msgs.msg.Pose): desired pose for end effector
             wait (bool): whether to block until finished
         """
+
         # self.arm_move_group_cmdr.set_goal_tolerance(0.01)
         # self.arm_move_group_cmdr.set_planning_time(10.0)
         self.arm_move_group_cmdr.set_pose_target(pose)
@@ -118,6 +119,17 @@ class Mover:
         plan = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
+
+        # save pose in a pickle file
+        if not hasattr(self, "outcomes"):
+            self.outcomes = [(pose, plan)]
+        else:
+            self.outcomes.append((pose, plan))
+
+            import pickle
+            with open('/home/tim/Research/bravo_ws/src/cl_tsgrasp/outputs.pkl', "wb") as f:
+                pickle.dump(self.outcomes, f)
+
         return plan
     
     def go_named_group_state(self, state: str, wait: bool = True):
