@@ -7,6 +7,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_ros/transform_listener.h>
 #include <rosparam_shortcuts/rosparam_shortcuts.h>
+#include "Eigen/Core"
 
 #include <omp.h>
 
@@ -123,16 +124,52 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
 
 }
 
+/* Find the z-offset orbital poses from this list of poses. */
+void find_orbital_poses(const std::vector<geometry_msgs::Pose>& grasp_poses,
+  std::vector<geometry_msgs::Pose>& orbital_poses)
+{
+  for (geometry_msgs::Pose p : grasp_poses)
+  {
+    geometry_msgs::Quaternion orn = p.orientation;
+
+    Eigen::Quaterniond q(orn.w, orn.x, orn.y, orn.z);
+    Eigen::Matrix3d rot_mat = q.toRotationMatrix();
+
+    Eigen::Vector3d z_hat = rot_mat.col(2);
+    Eigen::Vector3d pos(p.position.x, p.position.y, p.position.z);
+
+    float ORBIT_RADIUS = 0.1; // TODO fix magic number
+    pos = pos - z_hat * ORBIT_RADIUS;
+
+    geometry_msgs::Point o_pos;
+    o_pos.x = pos(0);
+    o_pos.y = pos(1);
+    o_pos.z = pos(2);
+
+    geometry_msgs::Pose o_pose;
+    o_pose.position = o_pos;
+    o_pose.orientation = orn;
+
+    orbital_poses.push_back(o_pose);
+  }
+}
+
 void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& msg)
 {
   // filter grasps by kinematic feasibility
   std::vector<bool> feasible = gf.filter_grasps(msg.poses, msg.header);
 
+  // filter orbital poses by kinematic feasibility
+  std::vector<geometry_msgs::Pose> o_poses;
+  find_orbital_poses(msg.poses, o_poses);
+  std::vector<bool> o_pose_feasible = gf.filter_grasps(o_poses, msg.header);
+
+
   std::vector<geometry_msgs::Pose> filtered_poses;
   std::vector<float> filtered_confs;
   for (size_t i = 0; i < feasible.size(); ++i)
   {
-    if (feasible[i])
+    if (feasible[i] && o_pose_feasible[i])
     {
       filtered_poses.push_back(msg.poses[i]);
       filtered_confs.push_back(msg.confs[i]);
