@@ -41,7 +41,7 @@ class SpawnNewItem(smach.State):
         )
         self.delete_model = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)
         self.spawn_model = rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)
-        self._cur_idx = np.random.randint(0, len(self.obj_ds))
+        self._cur_idx = 0 #np.random.randint(0, len(self.obj_ds))
 
     @staticmethod
     def random_pose_in_workspace():
