@@ -37,7 +37,7 @@ PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.1366 # 0.1034 for panda
 CONF_THRESHOLD  = 0 #0.5
 TOP_K           = 400
-BOUNDS          = torch.Tensor([[-2, -2, 0], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+BOUNDS          = torch.Tensor([[-2, -2, -1], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
