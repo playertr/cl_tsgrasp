@@ -113,6 +113,13 @@ class Mover:
 
         # self.arm_move_group_cmdr.set_goal_tolerance(0.01)
         # self.arm_move_group_cmdr.set_planning_time(10.0)
+
+        import copy
+        new_pose = copy.deepcopy(pose)
+        p = 4
+        new_pose.pose.position.x = round(pose.pose.position.x, p)
+        new_pose.pose.position.y = round(pose.pose.position.y, p)
+        new_pose.pose.position.z = round(pose.pose.position.z, p)
         self.arm_move_group_cmdr.set_pose_target(pose)
         print(f"Attempting to go to pose: \n{pose}")
         # self.arm_move_group_cmdr.set_goal_tolerance(0.1)
