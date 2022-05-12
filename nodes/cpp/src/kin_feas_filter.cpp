@@ -24,6 +24,8 @@ class GraspFilter
 
     std::string ik_frame;
 
+    tf2_ros::Buffer* tf_buffer_;
+
   protected:
 
     const robot_model::JointModelGroup* arm_jmg_;
@@ -31,7 +33,7 @@ class GraspFilter
     std::map<std::string, std::vector<kinematics::KinematicsBaseConstPtr>> kin_solvers;
     size_t num_threads_;
     double timeout_;
-    tf2_ros::Buffer* tf_buffer_;
+    
 };
 
 
@@ -91,8 +93,8 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
   boost::mutex vector_lock;
 
   omp_set_num_threads(num_threads_);
-  #pragma omp parallel for schedule(dynamic)
-  for (std::size_t grasp_id = 1; grasp_id < poses.size(); ++grasp_id)
+  // #pragma omp parallel for schedule(dynamic)
+  for (std::size_t grasp_id = 0; grasp_id < poses.size(); ++grasp_id)
   {
 
     // transform pose into IK frame
@@ -116,6 +118,14 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
     {
       boost::mutex::scoped_lock slock(vector_lock);
       feasible[grasp_id] = isValid;
+    }
+
+    if (isValid)
+    {
+      ROS_INFO_STREAM("VALID POSE FOUND: \nframe: " << ik_frame <<"\n" << 
+        poses[grasp_id]
+      );
+      break;
     }
 
   }
@@ -173,6 +183,22 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
     {
       filtered_poses.push_back(msg.poses[i]);
       filtered_confs.push_back(msg.confs[i]);
+      ROS_INFO_STREAM("FEASIBLE POSE FOUND: \nframe: " << msg.header.frame_id <<"\n" << 
+        msg.poses[i]
+      );
+      // Prepare to transform poses into IK frame
+      geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
+        "world", msg.header.frame_id, ros::Time(0), ros::Duration(1.0) 
+      );
+      geometry_msgs::Pose res = msg.poses[i];
+      tf2::doTransform(res, res, tf);
+
+      ROS_INFO_STREAM("\nframe: " << "world" <<"\n" << 
+        res
+      );
+
+      
+      break;
     }
   }
 

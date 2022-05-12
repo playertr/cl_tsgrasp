@@ -83,33 +83,35 @@ def publish_goal_callback(msg):
     confs = msg.confs
     poses = msg.poses
 
-    # filter the grasps in the world frame (for now)
-    world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
+    # # filter the grasps in the world frame (for now)
+    # world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
 
-    # allow only top-down-ish grasps (for now)
-    if True:
-        z_hat = np.array([0, 0, 1])
-        valid_idcs = [
-            i for (i, p) in enumerate(world_poses)
-            if quaternion_matrix(np.array(
-                [p.pose.orientation.x, p.pose.orientation.y, p.pose.orientation.z, p.pose.orientation.w]))[:3,2].dot(z_hat) < 0
-        ]
+    # # allow only top-down-ish grasps (for now)
+    # if True:
+    #     z_hat = np.array([0, 0, 1])
+    #     valid_idcs = [
+    #         i for (i, p) in enumerate(world_poses)
+    #         if quaternion_matrix(np.array(
+    #             [p.pose.orientation.x, p.pose.orientation.y, p.pose.orientation.z, p.pose.orientation.w]))[:3,2].dot(z_hat) < 0
+    #     ]
 
-        confs = [confs[i] for i in valid_idcs]
-        poses = [poses[i] for i in valid_idcs]
-        world_poses = [world_poses[i] for i in valid_idcs]
-        if len(confs) == 0: return
+    #     confs = [confs[i] for i in valid_idcs]
+    #     poses = [poses[i] for i in valid_idcs]
+    #     world_poses = [world_poses[i] for i in valid_idcs]
+    #     if len(confs) == 0: return
 
-    if grasp_lpf is None:
-        grasp_lpf = GraspPoseLPF(world_poses, confs)
-    else:
-        grasp_lpf.update(world_poses, confs)
+    # if grasp_lpf is None:
+    #     grasp_lpf = GraspPoseLPF(world_poses, confs)
+    # else:
+    #     grasp_lpf.update(world_poses, confs)
 
-    best_pose_world_frame = grasp_lpf.best_grasp
-    final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='world')
+    # best_pose_world_frame = grasp_lpf.best_grasp
+    # final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='world')
 
-    final_goal_pose_pub.publish(final_goal_pose)
+    # final_goal_pose_pub.publish(final_goal_pose)
 
+    final_goal_pose_pub.publish(PoseStamped(header=msg.header, pose=poses[np.argmax(confs)]))
+    
 grasp_sub = rospy.Subscriber(name='/tsgrasp/grasps', 
     data_class=Grasps, callback=publish_goal_callback, queue_size=1)
 
