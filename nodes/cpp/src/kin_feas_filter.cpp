@@ -164,7 +164,7 @@ void find_orbital_poses(const std::vector<geometry_msgs::Pose>& grasp_poses,
   }
 }
 
-void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& msg)
+void grasps_cb(GraspFilter& gf, ros::Publisher& pub, ros::Publisher& final_pose_pub, const cl_tsgrasp::Grasps& msg)
 {
   // filter grasps by kinematic feasibility
   std::vector<bool> feasible = gf.filter_grasps(msg.poses, msg.header);
@@ -209,6 +209,22 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
   filtered_msg.header = msg.header;
 
   pub.publish(filtered_msg);
+
+  if (filtered_msg.poses.size() > 0)
+  {
+    // Prepare to transform poses into IK frame
+    geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
+      "bravo_base_link", msg.header.frame_id, ros::Time(0), ros::Duration(1.0) 
+    );
+    geometry_msgs::Pose res = filtered_msg.poses[0];
+    tf2::doTransform(res, res, tf);
+
+    geometry_msgs::PoseStamped final_goal_pose;
+    final_goal_pose.header = msg.header;
+    final_goal_pose.header.frame_id = "bravo_base_link";
+    final_goal_pose.pose = res;
+    final_pose_pub.publish(final_goal_pose);
+  }
 }
 
 int main(int argc, char **argv)
@@ -246,7 +262,9 @@ int main(int argc, char **argv)
 
   ros::Publisher pub = nh.advertise<cl_tsgrasp::Grasps>(output_grasps_topic, 1000);
 
-  boost::function<void (const cl_tsgrasp::Grasps&)> cb = boost::bind(&grasps_cb, gf, pub, _1);
+  ros::Publisher final_pose_pub = nh.advertise<geometry_msgs::PoseStamped>("tsgrasp/final_goal_pose", 1000);
+
+  boost::function<void (const cl_tsgrasp::Grasps&)> cb = boost::bind(&grasps_cb, gf, pub, final_pose_pub, _1);
 
   ros::Subscriber sub = nh.subscribe<cl_tsgrasp::Grasps>(input_grasps_topic, 1, cb);
   
