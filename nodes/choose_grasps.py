@@ -83,8 +83,8 @@ def publish_goal_callback(msg):
     confs = msg.confs
     poses = msg.poses
 
-    # # filter the grasps in the world frame (for now)
-    # world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
+    # filter the grasps in the world frame (for now)
+    world_poses = [tf.pose_transform(PoseStamped(header=msg.header, pose=pose), target_frame='world') for pose in poses]
 
     # # allow only top-down-ish grasps (for now)
     # if True:
@@ -106,11 +106,14 @@ def publish_goal_callback(msg):
     #     grasp_lpf.update(world_poses, confs)
 
     # best_pose_world_frame = grasp_lpf.best_grasp
-    # final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='world')
+
+    best_pose_world_frame = world_poses[np.argmax(confs)]
+    final_goal_pose = tf.pose_transform(best_pose_world_frame, target_frame='world')
 
     # final_goal_pose_pub.publish(final_goal_pose)
 
-    final_goal_pose_pub.publish(PoseStamped(header=msg.header, pose=poses[np.argmax(confs)]))
+
+    final_goal_pose_pub.publish(final_goal_pose)
     
 grasp_sub = rospy.Subscriber(name='/tsgrasp/grasps', 
     data_class=Grasps, callback=publish_goal_callback, queue_size=1)
