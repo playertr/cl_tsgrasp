@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.1.3)
 project(cl_tsgrasp)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++11)
+add_compile_options(-std=c++14)
 
 # Warnings
 add_definitions(-W -Wall -Wextra
@@ -29,7 +29,6 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-find_package(OpenMP REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 
@@ -171,13 +170,6 @@ add_executable(kin_feas_filter
 # )
 target_link_libraries(kin_feas_filter
   ${catkin_LIBRARIES}
-)
-# Add threading support with OpenMP
-set_target_properties(kin_feas_filter
-  PROPERTIES COMPILE_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}"
-)
-set_target_properties(kin_feas_filter
-  PROPERTIES LINK_FLAGS "${OpenMP_CXX_FLAGS}"
 )
 
 #############
