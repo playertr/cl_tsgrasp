@@ -15,6 +15,31 @@
 using namespace std::chrono;
 #include <iostream>
 
+namespace
+{
+bool isGraspStateValid(const planning_scene::PlanningScene* planning_scene,
+                       robot_state::RobotState* robot_state, const robot_state::JointModelGroup* group,
+                       const double* ik_solution)
+{
+  robot_state->setJointGroupPositions(group, ik_solution);
+  robot_state->update();
+  if (!robot_state->satisfiesBounds(group))
+  {
+    ROS_DEBUG_STREAM_NAMED("is_grasp_state_valid", "Ik solution invalid");
+    return false;
+  }
+
+  if (!planning_scene)
+  {
+    ROS_ERROR_STREAM_NAMED("is_grasp_state_valid", "No planning scene provided");
+    return false;
+  }
+
+  return !planning_scene->isStateColliding(*robot_state, group->getName());
+}
+}  // namespace
+
+
 class GraspFilter
 {
   public:
@@ -38,10 +63,10 @@ class GraspFilter
 
 
 GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor, const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, int num_threads)
-  : arm_jmg_(arm_jmg)
+  : tf_buffer_(tf_buffer)
+  , arm_jmg_(arm_jmg)
   , planning_scene(planning_scene_monitor->getPlanningScene())
   , timeout_(timeout)
-  , tf_buffer_(tf_buffer)
 {
   robot_model::RobotState state = planning_scene->getCurrentState();
 
@@ -88,6 +113,10 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
   std::vector<double> ik_seed_state;
   state.copyJointGroupPositions(arm_jmg_, ik_seed_state);
 
+    // Create constraint_fn
+  moveit::core::GroupStateValidityCallbackFn constraint_fn =
+      boost::bind(&isGraspStateValid, planning_scene.get(), _1, _2, _3);
+
   // Loop through poses and find those that are kinematically feasible
   std::vector<bool> feasible(poses.size(), false);
   boost::mutex vector_lock;
@@ -101,7 +130,7 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
     tf2::doTransform(poses[grasp_id], poses[grasp_id], ik_tf);
 
     // perform IK
-    std::size_t thread_id = omp_get_thread_num();
+    // std::size_t thread_id = omp_get_thread_num();
 
     std::vector<double> solution;
     moveit_msgs::MoveItErrorCodes error_code;
@@ -110,10 +139,11 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
     // collisions. To incorporate collisions, refer to the moveit_grasps implementation for an example of  using
     // RobotState::setFromIK with a GroupStateValidityCallbackFn. This is much slower.
 
-    // Note: the IKFast plugin seems to work, but it throws a cryptic nonfatal error like "6 is 0.00000".
-    kin_solvers[arm_jmg_->getName()][thread_id]->getPositionIK(poses[grasp_id], ik_seed_state, solution, error_code);
+    // kin_solvers[arm_jmg_->getName()][thread_id]->getPositionIK(poses[grasp_id], ik_seed_state, solution, error_code);
 
-    bool isValid = error_code.val == moveit_msgs::MoveItErrorCodes::SUCCESS;
+    robot_state::RobotState state = planning_scene->getCurrentState();
+
+    bool isValid = state.setFromIK(arm_jmg_, poses[grasp_id], timeout_, constraint_fn);
 
     {
       boost::mutex::scoped_lock slock(vector_lock);
