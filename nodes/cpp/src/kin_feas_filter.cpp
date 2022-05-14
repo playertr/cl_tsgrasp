@@ -191,11 +191,11 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, ros::Publisher& final_pose_
   }
 
   // filter grasps by kinematic feasibility
-  std::vector<bool> feasible = gf.filter_grasps(msg.poses, msg.header);
+  std::vector<bool> feasible = gf.filter_grasps(poses, msg.header);
 
   // filter orbital poses by kinematic feasibility
   std::vector<geometry_msgs::Pose> o_poses;
-  find_orbital_poses(msg.poses, o_poses);
+  find_orbital_poses(poses, o_poses);
   std::vector<bool> o_pose_feasible = gf.filter_grasps(o_poses, msg.header);
 
   std::vector<geometry_msgs::Pose> filtered_poses;
