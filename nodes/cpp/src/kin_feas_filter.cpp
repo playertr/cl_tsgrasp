@@ -65,7 +65,7 @@ class GraspFilter
 GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor, const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, int num_threads)
   : tf_buffer_(tf_buffer)
   , arm_jmg_(arm_jmg)
-  , planning_scene(planning_scene_monitor->getPlanningScene())
+  , planning_scene(planning_scene::PlanningScene::clone(planning_scene_monitor->getPlanningScene()))
   , timeout_(timeout)
 {
   robot_model::RobotState state = planning_scene->getCurrentState();
@@ -102,18 +102,12 @@ GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr plannin
 
 std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> poses, std_msgs::Header header)
 {
-
-  // Prepare to transform poses into IK frame
-  geometry_msgs::TransformStamped ik_tf = tf_buffer_->lookupTransform(
-    ik_frame, header.frame_id, ros::Time(0), ros::Duration(1.0) 
-  );
-
   // Use current state as the IK seed state
   robot_model::RobotState state = planning_scene->getCurrentState();
   std::vector<double> ik_seed_state;
   state.copyJointGroupPositions(arm_jmg_, ik_seed_state);
 
-    // Create constraint_fn
+  // Create constraint_fn
   moveit::core::GroupStateValidityCallbackFn constraint_fn =
       boost::bind(&isGraspStateValid, planning_scene.get(), _1, _2, _3);
 
@@ -126,20 +120,11 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
   for (std::size_t grasp_id = 0; grasp_id < poses.size(); ++grasp_id)
   {
 
-    // transform pose into IK frame
-    tf2::doTransform(poses[grasp_id], poses[grasp_id], ik_tf);
-
     // perform IK
     // std::size_t thread_id = omp_get_thread_num();
 
     std::vector<double> solution;
     moveit_msgs::MoveItErrorCodes error_code;
-
-    // We're using getPositionIK, which finds the joint angles to reach a pose in ~20 uS, without checking for
-    // collisions. To incorporate collisions, refer to the moveit_grasps implementation for an example of  using
-    // RobotState::setFromIK with a GroupStateValidityCallbackFn. This is much slower.
-
-    // kin_solvers[arm_jmg_->getName()][thread_id]->getPositionIK(poses[grasp_id], ik_seed_state, solution, error_code);
 
     robot_state::RobotState state = planning_scene->getCurrentState();
 
@@ -148,14 +133,6 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
     {
       boost::mutex::scoped_lock slock(vector_lock);
       feasible[grasp_id] = isValid;
-    }
-
-    if (isValid)
-    {
-      ROS_INFO_STREAM("VALID POSE FOUND: \nframe: " << ik_frame <<"\n" << 
-        poses[grasp_id]
-      );
-      break;
     }
 
   }
@@ -196,6 +173,23 @@ void find_orbital_poses(const std::vector<geometry_msgs::Pose>& grasp_poses,
 
 void grasps_cb(GraspFilter& gf, ros::Publisher& pub, ros::Publisher& final_pose_pub, const cl_tsgrasp::Grasps& msg)
 {
+  // transform all grasp poses into the IK solver frame if not already
+  std::vector<geometry_msgs::Pose> poses;
+  if (moveit::core::Transforms::sameFrame(gf.ik_frame, msg.header.frame_id))
+  {
+      poses = msg.poses;
+  } else
+  {
+    geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
+        gf.ik_frame, msg.header.frame_id, ros::Time(0), ros::Duration(1.0));
+    for (geometry_msgs::Pose p : msg.poses) 
+    {
+      geometry_msgs::Pose ik_pose;
+      tf2::doTransform(p, ik_pose, tf);
+      poses.push_back(ik_pose);
+    }
+  }
+
   // filter grasps by kinematic feasibility
   std::vector<bool> feasible = gf.filter_grasps(msg.poses, msg.header);
 
@@ -204,31 +198,14 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, ros::Publisher& final_pose_
   find_orbital_poses(msg.poses, o_poses);
   std::vector<bool> o_pose_feasible = gf.filter_grasps(o_poses, msg.header);
 
-
   std::vector<geometry_msgs::Pose> filtered_poses;
   std::vector<float> filtered_confs;
   for (size_t i = 0; i < feasible.size(); ++i)
   {
     if (feasible[i] && o_pose_feasible[i])
     {
-      filtered_poses.push_back(msg.poses[i]);
+      filtered_poses.push_back(poses[i]);
       filtered_confs.push_back(msg.confs[i]);
-      ROS_INFO_STREAM("FEASIBLE POSE FOUND: \nframe: " << msg.header.frame_id <<"\n" << 
-        msg.poses[i]
-      );
-      // Prepare to transform poses into IK frame
-      geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
-        "world", msg.header.frame_id, ros::Time(0), ros::Duration(1.0) 
-      );
-      geometry_msgs::Pose res = msg.poses[i];
-      tf2::doTransform(res, res, tf);
-
-      ROS_INFO_STREAM("\nframe: " << "world" <<"\n" << 
-        res
-      );
-
-      
-      break;
     }
   }
 
@@ -237,24 +214,10 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, ros::Publisher& final_pose_
   filtered_msg.poses = filtered_poses;
   filtered_msg.confs = filtered_confs;
   filtered_msg.header = msg.header;
+  filtered_msg.header.frame_id = gf.ik_frame;
 
   pub.publish(filtered_msg);
 
-  if (filtered_msg.poses.size() > 0)
-  {
-    // Prepare to transform poses into IK frame
-    geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
-      "bravo_base_link", msg.header.frame_id, ros::Time(0), ros::Duration(1.0) 
-    );
-    geometry_msgs::Pose res = filtered_msg.poses[0];
-    tf2::doTransform(res, res, tf);
-
-    geometry_msgs::PoseStamped final_goal_pose;
-    final_goal_pose.header = msg.header;
-    final_goal_pose.header.frame_id = "bravo_base_link";
-    final_goal_pose.pose = res;
-    final_pose_pub.publish(final_goal_pose);
-  }
 }
 
 int main(int argc, char **argv)
