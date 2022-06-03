@@ -9,11 +9,11 @@ import numpy as np
 
 ## constants
 # TODO change to rosparam
-ORBIT_RADIUS = 0.1 # distance to initially orbit object before terminal homing
+ORBIT_RADIUS = 0.2 # distance to initially orbit object before terminal homing
 
 orbital_pose_pub = rospy.Publisher('/tsgrasp/orbital_pose', PoseStamped, queue_size=1)
 
-def orbital_pose(goal_pose):
+def orbital_pose(goal_pose: PoseStamped, orbit_radius=ORBIT_RADIUS) -> PoseStamped:
     """Return a pose offset from the goal (end effector) pose along the z direction."""
     o = goal_pose.pose.orientation
     q = quaternion.from_float_array(np.array([o.w, o.x, o.y, o.z]))
@@ -21,7 +21,7 @@ def orbital_pose(goal_pose):
     z_hat = rot[:3, 2]
     p = goal_pose.pose.position
     pos = np.array([p.x, p.y, p.z])
-    pos -= z_hat * ORBIT_RADIUS
+    pos -= z_hat * orbit_radius
     pos = Vector3(x=pos[0],y=pos[1],z=pos[2])
     orbit_pose = PoseStamped(
         header=goal_pose.header,
@@ -32,8 +32,9 @@ def orbital_pose(goal_pose):
 def goal_pose_cb(msg):
     orbital_pose_pub.publish(orbital_pose(msg))
 
-rospy.init_node('publish_orbital_pose')
-rospy.Subscriber('/tsgrasp/final_goal_pose', PoseStamped, goal_pose_cb, queue_size=1)
+if __name__ == "__main__":
+    rospy.init_node('publish_orbital_pose')
+    rospy.Subscriber('/tsgrasp/final_goal_pose', PoseStamped, goal_pose_cb, queue_size=1)
 
-rospy.loginfo('Ready to publish orbital pose.')
-rospy.spin()
+    rospy.loginfo('Ready to publish orbital pose.')
+    rospy.spin()
