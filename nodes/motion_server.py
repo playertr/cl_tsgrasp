@@ -11,7 +11,7 @@ import actionlib
 import cl_tsgrasp.msg
 from geometry_msgs.msg import PoseStamped
 from rospy.numpy_msg import numpy_msg
-from utils import TransformFrames, se3_dist
+from utils import TFHelper, se3_dist
 
 SUCCESS_RADIUS = 0.02 # in SE(3) space -- dimensionless
 
@@ -73,7 +73,7 @@ class MotionAction:
 if __name__ == '__main__':
     rospy.init_node('motion_server')
 
-    tf = TransformFrames() # wrapper around a tf2_ros Buffer
+    tf = TFHelper() # wrapper around a tf2_ros Buffer
 
     pose_sub = rospy.Subscriber( # subscribe to live end effector state
         name='/tsgrasp/ee_pose',
