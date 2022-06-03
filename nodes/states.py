@@ -23,7 +23,7 @@ MIN_DIST        = 0.001
 
 # SpawnNewItem
 WORKSPACE_BOUNDS    = [[-0.1, -0.3], [0.1, -0.1]]
-TABLE_HEIGHT        = 0.4
+TABLE_HEIGHT        = 0.2
 
 # SpawnNewItem state
 class SpawnNewItem(smach.State):
@@ -41,7 +41,11 @@ class SpawnNewItem(smach.State):
         )
         self.delete_model = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)
         self.spawn_model = rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)
-        self._cur_idx = 0 #np.random.randint(0, len(self.obj_ds))
+
+        # reproducibly shuffle the items
+        np.random.seed(2022)
+        self.idcs = np.random.permutation(len(self.obj_ds))
+        self._cur_item = 0
 
     @staticmethod
     def random_pose_in_workspace():
@@ -64,9 +68,9 @@ class SpawnNewItem(smach.State):
         if self._cur_name is not None:
             self.delete_model(self._cur_name)
 
-        if self._cur_idx > len(self.obj_ds): self._cur_idx = 0
-        obj = self.obj_ds[self._cur_idx]
-        self._cur_idx += 1
+        if self._cur_item > len(self.obj_ds): self._cur_item = 0
+        obj = self.obj_ds[self.idcs[self._cur_item]]
+        self._cur_item += 1
         
         self._cur_name = obj.name
         item_pose = self.random_pose_in_workspace()
@@ -291,7 +295,6 @@ class ServoToOrbitalPose(TerminalHoming):
 
         return super().execute(userdata)
 
-## Allow Hand Collisions state
 class AllowHandCollisions(smach.State):
 
     def __init__(self, mover: Mover):
@@ -303,7 +306,6 @@ class AllowHandCollisions(smach.State):
         self.mover.add_object_for_pickup()
         return 'hand_collisions_allowed'
 
-## Disallow Hand Collisions state
 class DisallowHandCollisions(smach.State):
 
     def __init__(self, mover: Mover):
@@ -315,7 +317,6 @@ class DisallowHandCollisions(smach.State):
         self.mover.remove_object_after_pickup()
         return 'hand_collisions_disallowed'
 
-## Open Jaws State
 class OpenJaws(smach.State):
 
     def __init__(self, mover: Mover):
@@ -324,10 +325,9 @@ class OpenJaws(smach.State):
 
     def execute(self, userdata):
         rospy.loginfo('Executing state OPEN_JAWS')
-        success = self.mover.go_gripper(np.array([0.03]))
+        success = self.mover.go_gripper(np.array([0.02]))
         return 'jaws_open' if success else 'jaws_not_open'
 
-## Close Jaws State
 class CloseJaws(smach.State):
 
     def __init__(self, mover: Mover):
@@ -339,14 +339,96 @@ class CloseJaws(smach.State):
         success = self.mover.go_gripper(np.array([0.0]))
         return 'jaws_closed' if success else 'jaws_not_closed'
 
-## Reset Position State
-class ResetPos(smach.State):
+class GoToDrawnBack(smach.State):
 
     def __init__(self, mover: Mover):
         smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
         self.mover = mover
 
     def execute(self, userdata):
-        rospy.loginfo('Executing state RESET_POSITION')
+        rospy.loginfo('Executing state GO_TO_DRAWN_BACK')
         success = self.mover.go_named_group_state('drawn_back')
         return 'position_reset' if success else 'position_not_reset'
+
+class GoToRest(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
+        self.mover = mover
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state GO_TO_REST')
+        success = self.mover.go_named_group_state('rest')
+        return 'position_reset' if success else 'position_not_reset'
+
+class ServoToGoalPose(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['position_reset', 'position_not_reset'])
+        self.mover = mover
+        final_goal_pose_sub = rospy.Subscriber(
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+
+    def _goal_pose_cb(self, msg):
+        self._final_goal_pose = msg
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state SERVO_TO_GOAL_POSE')
+        success = self.mover.servo_to_goal_pose(self._final_goal_pose)
+        return 'in_goal_pose' if success else 'not_in_goal_pose'
+
+class ExecuteGraspOpenLoop(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['grasp_executed', 'grasp_not_executed'])
+        self.mover = mover
+        orbital_pose_sub = rospy.Subscriber(
+            name='/tsgrasp/orbital_pose', data_class=PoseStamped, 
+            callback=self._orbital_pose_cb, queue_size=1)
+        final_goal_pose_sub = rospy.Subscriber(
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+
+    def _orbital_pose_cb(self, msg):
+        self._orbital_pose = msg
+
+    def _goal_pose_cb(self, msg):
+        self._final_goal_pose = msg
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state EXECUTE_GRASP_OPEN_LOOP')
+        if self._orbital_pose is None or self._final_goal_pose is None:
+            rospy.logerr('Orbital or final pose not initialized.')
+            return 'grasp_not_executed'
+
+        success = self.mover.execute_grasp_open_loop(self._orbital_pose, self._final_goal_pose)
+        return 'grasp_executed' if success else 'grasp_not_executed'
+
+
+class ExecuteGraspClosedLoop(smach.State):
+
+    def __init__(self, mover: Mover):
+        smach.State.__init__(self, outcomes=['grasp_executed', 'grasp_not_executed'])
+        self.mover = mover
+        orbital_pose_sub = rospy.Subscriber(
+            name='/tsgrasp/orbital_pose', data_class=PoseStamped, 
+            callback=self._orbital_pose_cb, queue_size=1)
+        final_goal_pose_sub = rospy.Subscriber(
+            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
+            callback=self._goal_pose_cb, queue_size=1)
+
+    def _orbital_pose_cb(self, msg):
+        self._orbital_pose = msg
+
+    def _goal_pose_cb(self, msg):
+        self._final_goal_pose = msg
+
+    def execute(self, userdata):
+        rospy.loginfo('Executing state EXECUTE_GRASP_CLOSED_LOOP')
+        if self._orbital_pose is None or self._final_goal_pose is None:
+            rospy.logerr('Orbital or final pose not initialized.')
+            return 'grasp_not_executed'
+
+        success = self.mover.execute_grasp_closed_loop(self._orbital_pose, self._final_goal_pose)
+        return 'grasp_executed' if success else 'grasp_not_executed'
