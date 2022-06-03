@@ -32,12 +32,13 @@ except ImportError as e:
     print("\t\t")
 
 ## global constants
-QUEUE_LEN       = 4
+QUEUE_LEN       = 1
 PTS_PER_FRAME   = 45000
-GRIPPER_DEPTH   = 0.1366 # 0.1034 for panda
-CONF_THRESHOLD  = 0 #0.5
-TOP_K           = 400
-BOUNDS          = torch.Tensor([[-2, -2, -1], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
+CONF_THRESHOLD  = 0
+TOP_K           = 1000
+WORLD_BOUNDS    = torch.Tensor([[-0.5, -1.5, 0.02], [0.8, 0.8, 0.8]]) # (xyz_lower, xyz_upper)
+CAM_BOUNDS      = torch.Tensor([[-0.5, -0.5, 0.22], [0.5, 0.5, 0.5]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
@@ -58,11 +59,41 @@ queue = deque(maxlen=QUEUE_LEN) # FIFO queue, right side is most recent
 queue_mtx = Lock()
 latest_header = Header()
 
-ee_pose_msg = None
+cam_pose_msg = None
 
-def ee_pose_cb(msg):
-    global ee_pose_msg
-    ee_pose_msg = msg
+class PoseParticleFilter:
+
+    def __init__(self, N = 10_000, poses: torch.Tensor = None, weights: torch.Tensor = None):
+        self.N = N
+        self.poses = poses
+        self.weights = weights
+
+    def update(self, new_poses, new_weights):
+        if self.poses is None:
+            self.poses = new_poses
+            self.weights = new_weights
+            return
+
+        if len(new_weights) == 0:
+            return
+
+        poses = torch.cat([self.poses, new_poses])
+        weights = torch.cat([self.weights, new_weights])
+
+        idcs = torch.multinomial(
+            input = weights.flatten(),
+            num_samples = self.N,
+            replacement=True
+        )
+
+        self.poses = poses[idcs]
+        self.weights = weights[idcs]
+
+pf = PoseParticleFilter(TOP_K)
+
+def cam_pose_cb(msg):
+    global cam_pose_msg
+    cam_pose_msg = msg
 
 import time
 class TimeIt:
@@ -76,7 +107,7 @@ class TimeIt:
         self.t0 = time.time()
 
     def __exit__(self, t, value, traceback):
-        # torch.cuda.synchronize()
+        torch.cuda.synchronize()
         self.t1 = time.time()
         if self.print_output:
             print('%s: %s' % (self.s, self.t1 - self.t0))
@@ -270,12 +301,26 @@ def in_bounds(world_pts, BOUNDS):
     )
     return in_bounds
 
-def bound_point_cloud(pts, poses):
+def bound_point_cloud_cam(pts, poses):
+    """Bound the point cloud in the camera frame."""
+    for i, pose in zip(range(len(pts)), poses):
+        valid = in_bounds(pts[i], CAM_BOUNDS)
+        pts[i] = pts[i][valid]
+    
+    ## ensure nonzero
+    if sum(len(pt) for pt in pts) == 0:
+        print("No points in bounds")
+        return
+
+    return pts
+
+def bound_point_cloud_world(pts, poses):
+    """Bound the point cloud in the world frame."""
     for i, pose in zip(range(len(pts)), poses):
         world_pc = transform_vec(
             pts[i].unsqueeze(0), pose.unsqueeze(0)
         )[0]
-        valid = in_bounds(world_pc, BOUNDS)
+        valid = in_bounds(world_pc, WORLD_BOUNDS)
         pts[i] = pts[i][valid]
     
     ## ensure nonzero
@@ -337,7 +382,7 @@ def filter_grasps(grasps, confs):
         return None, None
 
     # top-k selection
-    vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, confs.squeeze().numel()), sorted=True)
+    vals, top_idcs = torch.topk(confs.squeeze(), k=min(100*TOP_K, confs.squeeze().numel()), sorted=True)
     grasps = grasps[top_idcs]
     confs = confs[top_idcs]
 
@@ -350,8 +395,8 @@ def filter_grasps(grasps, confs):
     _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
     selected_idcs = selected_idcs.squeeze()
 
-    # grasps = grasps[selected_idcs]
-    # confs = confs[selected_idcs]
+    grasps = grasps[selected_idcs]
+    confs = confs[selected_idcs]
 
     return grasps, confs
 
@@ -402,6 +447,9 @@ def ensure_grasp_y_axis_upward(grasps: torch.Tensor) -> torch.Tensor:
 @torch.inference_mode()
 def find_grasps():
     global queue, device, queue_mtx
+    with queue_mtx:
+        if len(queue) != QUEUE_LEN: return
+    
 
     with TimeIt("FIND_GRASPS() fn: "):
         with TimeIt('Unpack pointclouds'):
@@ -433,9 +481,15 @@ def find_grasps():
         ## Processing pipeline
 
         # Start with pts, a list of Torch point clouds.
+
+        # Remove points that are outside of the boundaries in the camera frame.
+        with TimeIt('Bound Point Cloud'):
+            pts             = bound_point_cloud_cam(pts, poses)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+
         # Remove points that are outside of the boundaries in the global frame.
         with TimeIt('Bound Point Cloud'):
-            pts             = bound_point_cloud(pts, poses)
+            pts             = bound_point_cloud_world(pts, poses)
             if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Downsample the points with uniform probability.
@@ -446,7 +500,7 @@ def find_grasps():
         # Transform the points into the frame of the last camera perspective.
         with TimeIt('Transform to Camera Frame'):
             pts             = transform_to_camera_frame(pts, poses)
-            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+            if pts is None or any(len(pcl) < 2 for pcl in pts): return # bug with length-one pcs
 
         # Run the NN to identify grasp poses and confidences.
         with TimeIt('Find Grasps'):
@@ -465,6 +519,11 @@ def find_grasps():
         with TimeIt('Transform to eq pose'):
             grasps = transform_to_eq_pose(grasps)
         
+        # with TimeIt('Particle Filter'):
+        #     pf.update(grasps, confs)
+        #     grasps = pf.poses
+        #     confs = pf.weights
+
         with TimeIt('Publish Grasps'):
         
             # convert homogeneous poses to ros message poses
@@ -507,31 +566,31 @@ def find_grasps():
 # https://robotics.stackexchange.com/questions/20069/are-rospy-subscriber-callbacks-executed-sequentially-for-a-single-topic
 # https://nu-msr.github.io/me495_site/lecture08_threads.html
 def depth_callback(depth_msg):
-    global queue, queue_mtx, ee_pose_msg
+    global queue, queue_mtx, cam_pose_msg
     # print(f'Message received: {depth_msg.header.stamp}')
     # with TimeIt('Queueing'):
 
-    ee_tf = torch.eye(4)
-    ee_orn = ee_pose_msg.pose.orientation
-    ee_orn = torch.Tensor([ee_orn.x, ee_orn.y, ee_orn.z, ee_orn.w])
-    ee_orn = quaternion_to_rotation_matrix(ee_orn, order=QuaternionCoeffOrder.XYZW)
-    ee_tf[:3, :3] = ee_orn
+    cam_tf = torch.eye(4)
+    cam_orn = cam_pose_msg.pose.orientation
+    cam_orn = torch.Tensor([cam_orn.x, cam_orn.y, cam_orn.z, cam_orn.w])
+    cam_orn = quaternion_to_rotation_matrix(cam_orn, order=QuaternionCoeffOrder.XYZW)
+    cam_tf[:3, :3] = cam_orn
 
-    ee_pos = ee_pose_msg.pose.position
-    ee_pos = torch.Tensor([ee_pos.x, ee_pos.y, ee_pos.z])
-    ee_tf[:3, 3] = ee_pos 
+    cam_pos = cam_pose_msg.pose.position
+    cam_pos = torch.Tensor([cam_pos.x, cam_pos.y, cam_pos.z])
+    cam_tf[:3, 3] = cam_pos 
     
     with queue_mtx:
-        queue.append((depth_msg, ee_tf))
+        queue.append((depth_msg, cam_tf))
 
 # subscribe to throttled point cloud
 # depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
 depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
-ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
+cam_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, cam_pose_cb, queue_size=1)
 
-r = rospy.Rate(5)
+# r = rospy.Rate(5)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
 
-    r.sleep()
+    # r.sleep()
