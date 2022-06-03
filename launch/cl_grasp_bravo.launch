@@ -1,5 +1,6 @@
 <!-- A top-level launch file to start closed loop grasping on the Bravo arm -->
 <!-- Prior to launching, set enviroment variables with `source $(rospack find cl_tsgrasp)/config/machine_setup.bash` -->
+
 <launch>
 
     <arg name="simulated"
@@ -17,7 +18,7 @@
 
     <!-- Load the URDF onto the parameter server -->
     <param name="bravo/robot_description" 
-        command="xacro '$(find bpl_bravo_description_real)/urdf/bravo_7_example.urdf.xacro' with_camera:=$(arg with_camera)"/>
+        command="xacro '$(find bpl_bravo_description_real)/urdf/bravo_7_example.urdf.xacro' with_camera:=$(arg with_camera) with_force_torque_sensor:=true"/>
 
     <!-- Real Bravo - - not Gazebo -->
     <group if="$(eval arg('simulated') == false)">
@@ -43,11 +44,11 @@
         <remap from="/camera/depth/color/points" to="/camera/depth/points"/>
         <include file="$(find realsense2_camera)/launch/rs_camera.launch">
             <arg name="enable_pointcloud" value="true" />
+            <arg name="output" value="log" />
         </include>
 
-        <node pkg="tf" type="static_transform_publisher" 
-            name="depth_cam_link_to_realsense" 
-            args="0 0 0 0 0 0 depth_cam_link camera_link  100" />
+         <!-- Publish the camera pose transform obtained from MoveIt Calibration -->
+        <include file="$(find bravo_arm_sw)/launch/cam_pose.launch" />
 
     </group>
 
@@ -84,19 +85,13 @@
         <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
             output="screen" 
             ns="bravo"
-            args="joint_state_controller arm_position_controller hand_position_controller" 
-            launch-prefix="xterm -hold -e "
+            args="joint_state_controller arm_position_controller hand_position_controller"
             />
 
-        <node pkg="tf" type="static_transform_publisher" 
-            name="depth_cam_link_to_realsense" 
-            args="0 0 0 0 0 0 kinect_optical_link camera_depth_optical_frame  100" />
     </group>
 
     <!-- Copy the ROS /joint_states topic to tf for visualization -->
-    <node name="robot_state_publisher" 
-        pkg="robot_state_publisher" 
-        type="robot_state_publisher"
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
         ns="bravo" 
         respawn="true" 
         output="screen"
@@ -113,12 +108,13 @@
     args="-d $(find cl_tsgrasp)/config/bravo.rviz"/>
 
     <!-- Start moveit_servo node for cartesian end-effector velocity control -->
-    <node ns="bravo" name="servo_server" pkg="moveit_servo" type="servo_server" output="screen" launch-prefix="xterm -hold -e ">
+    <node ns="bravo" name="servo_server" pkg="moveit_servo" type="servo_server" output="screen" launch-prefix="xterm -hold -e " respawn="true">
         <rosparam command="load" file="$(find bpl_bravo_moveit_config)/config/bravo_moveit_servo.yaml" />
-        <remap from="/planning_scene_world" to="bravo/move_group/planning_scene_world"/>
-        <remap from="/planning_scene" to="bravo/move_group/planning_scene"/>
-        <remap from="/get_planning_scene" to="bravo/move_group/get_planning_scene"/>
-        <remap from="/monitored_planning_scene" to="monitored_planning_scene"/>
+        <!-- Remap topics to move_group https://github.com/ros-planning/moveit/issues/3067 -->
+        <remap from="planning_scene_world" to="move_group/planning_scene_world"/>
+        <remap from="planning_scene" to="move_group/monitored_planning_scene"/>
+        <remap from="collision_object" to="move_group/collision_object"/>
+        <remap from="attached_collision_object" to="move_group/attached_collision_object"/>
     </node>
     <!-- Optionally start a teleop_twist_joy node for a game controller -->
     <group if="$(eval arg('use_controller'))">
@@ -138,41 +134,44 @@
                 twist=m
             )' --import geometry_msgs rospy std_msgs --wait-for-start"/>
 
+        <!-- Start a node to control the gripper with the controller triggers -->
         <node pkg="rsa_bravo_driver" type="joy_trigger_jaw.py" name="joy_trigger_jaw" 
             output="screen" launch-prefix="xterm -hold -e "
         />
     </group>
 
-    <!-- Graphical slider to control joint positions for testing -->
-    <!-- <node pkg="rqt_joint_trajectory_controller" type="rqt_joint_trajectory_controller" name="rqt_joint_trajectory_controller" ns="bravo"/> -->
-
     <!-- Grasp network node -->
     <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
-     output="screen" respawn="true" launch-prefix="xterm -hold -e $(env NN_CONDA_PATH)">
+     output="screen" respawn="true" launch-prefix="xterm -hold -e taskset -c 3 $(env NN_CONDA_PATH)">
         <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
     </node>
 
     <!-- Kinematic feasibility filter -->
     <!-- The IKFast plugin tends to get greedy and take up 8 CPU cores. It does fine with only one.
     The `taskset` command limits the cores it can access at the OS level (a hack). -->
-    <rosparam file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
-    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen" launch-prefix="taskset --cpu-list 1 xterm -hold -e">
-        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
-        <remap from="tsgrasp/grasps_filtered" to="tsgrasp/grasps" />
+    <rosparam ns="bravo" file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
+    <node ns="bravo" pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" 
+        respawn="true" output="screen" launch-prefix="xterm -hold -e taskset -c 1">
+        <remap from="tsgrasp/grasps" to="/tsgrasp/grasps_unfiltered" />
+        <remap from="tsgrasp/grasps_filtered" to="/tsgrasp/grasps" />
+        <remap from="planning_scene_world" to="move_group/planning_scene_world"/>
+        <remap from="planning_scene" to="move_group/monitored_planning_scene"/>
+        <remap from="collision_object" to="move_group/collision_object"/>
+        <remap from="attached_collision_object" to="move_group/attached_collision_object"/>
     </node>
 
 
     <!-- Node to select goal pose -->
-    <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" launch-prefix="xterm -hold -e "/>
+    <!-- <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" respawn="true" launch-prefix="xterm -hold -e "/> -->
 
     <!-- Node to publish orbital pose -->
     <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" launch-prefix="xterm -hold -e " />
 
     <!-- Node to publish end effector pose -->
-    <node pkg="cl_tsgrasp" type="publish_ee_pose.py" respawn="true" name="publish_ee_pose"  output="screen" launch-prefix="xterm -hold -e " />
+    <!-- <node pkg="cl_tsgrasp" type="publish_ee_pose.py" respawn="true" name="publish_ee_pose"  output="screen" launch-prefix="xterm -hold -e " /> -->
 
     <!-- Node to publish camera pose -->
-    <node pkg="cl_tsgrasp" type="publish_cam_pose.py" respawn="true" name="publish_cam_pose" />
+    <node pkg="cl_tsgrasp" type="publish_cam_pose.py" respawn="true" name="publish_cam_pose" output="screen" launch-prefix="xterm -hold -e " />
 
     <!-- Node to transform PoseStamped[] into PoseArray for rviz visualization -->
     <node pkg="topic_tools" type="transform" name="pose_translater"
@@ -185,14 +184,27 @@
     </node>
 
     <!-- show invalid grasps in red -->
+    <!-- "(255.0, 0.0, 0.0, 0.05) -->
     <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers_unfiltered" launch-prefix="xterm -hold -e" args='--color "(255.0, 0.0, 0.0, 0.05)"' >
         <remap from="grasps" to="tsgrasp/grasps_unfiltered" />
         <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers_unfiltered" />
     </node>
     
-    <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e"/>
+    <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e" respawn="true"/>
     <!-- launch-prefix="gnome-terminal command"/> -->
 
     <!-- <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure"/> -->
 
+    <!-- Graphical slider to control joint positions for testing -->
+    <!-- <node pkg="rqt_joint_trajectory_controller" type="rqt_joint_trajectory_controller" name="rqt_joint_trajectory_controller" ns="bravo"/>
+
+    <node pkg="rqt_plot" type="rqt_plot" name="plotter" args="/bravo/joint_states/position[1]"/> -->
+
+    <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="log">
+        <param name="pixel_format" value="yuyv"/>
+        <param name="video_device" value="/dev/video10"/>
+        <param name="image_width" value="1280"/>
+        <param name="image_height" value="720"/>
+        <param name="framerate" value="30"/>
+    </node>
   </launch>
