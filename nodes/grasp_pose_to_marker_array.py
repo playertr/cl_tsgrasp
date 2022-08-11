@@ -65,6 +65,7 @@ def poses_cb(msg):
         marker.pose.position = pose.position
         marker_array.markers.append(marker)
 
+    print("Publishing marker array.")
     marker_array_pub.publish(marker_array)
 
 if __name__ == "__main__":
