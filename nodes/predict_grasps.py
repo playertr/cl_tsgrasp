@@ -32,13 +32,13 @@ except ImportError as e:
     print("\t\t")
 
 ## global constants
-QUEUE_LEN       = 1
+QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
 CONF_THRESHOLD  = 0
 TOP_K           = 1000
-WORLD_BOUNDS    = torch.Tensor([[-0.5, -1.5, 0.02], [0.8, 0.8, 0.8]]) # (xyz_lower, xyz_upper)
-CAM_BOUNDS      = torch.Tensor([[-0.5, -0.5, 0.22], [0.5, 0.5, 0.5]]) # (xyz_lower, xyz_upper)
+WORLD_BOUNDS    = torch.Tensor([[-2, -2, -1], [2, 2, 1]]) # (xyz_lower, xyz_upper)
+CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 2]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
