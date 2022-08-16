@@ -8,6 +8,8 @@
 #include <tf2_ros/transform_listener.h>
 #include <rosparam_shortcuts/rosparam_shortcuts.h>
 #include "Eigen/Core"
+#include <moveit_visual_tools/moveit_visual_tools.h>
+#include <trajectory_msgs/JointTrajectoryPoint.h>
 
 #include <omp.h>
 
@@ -44,37 +46,49 @@ class GraspFilter
 {
   public:
     GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor, 
-      const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, int num_threads, double orbital_radius);
+      const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, 
+      int num_threads, double orbital_radius, bool visual_debug);
 
     std::vector<bool> filter_grasps(std::vector<geometry_msgs::Pose> poses);
 
-    std::string ik_frame;
-
+    std::string ik_frame_;
+    std::string model_frame_;
     tf2_ros::Buffer* tf_buffer_;
 
     double orbital_radius_;
 
+    bool visual_debug_;
+    moveit_visual_tools::MoveItVisualToolsPtr visual_tools_;
+    std::map<std::string, std::vector<kinematics::KinematicsBaseConstPtr>> kin_solvers;
+    const robot_model::JointModelGroup* arm_jmg_;
+
+    const planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor_;
+
   protected:
 
-    const robot_model::JointModelGroup* arm_jmg_;
-    const planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor_;
-    std::map<std::string, std::vector<kinematics::KinematicsBaseConstPtr>> kin_solvers;
     size_t num_threads_;
     double timeout_;
     
 };
 
-
 GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor, 
-  const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, int num_threads, double orbital_radius)
+  const robot_model::JointModelGroup* arm_jmg, double timeout, tf2_ros::Buffer* tf_buffer, 
+  int num_threads, double orbital_radius, bool visual_debug)
   : tf_buffer_(tf_buffer)
   , orbital_radius_(orbital_radius)
   , arm_jmg_(arm_jmg)
   , planning_scene_monitor_(planning_scene_monitor)
   , timeout_(timeout)
+  , visual_debug_(visual_debug)
 {
 
-  // Choose number of threads
+  if (visual_debug_) 
+  {
+    visual_tools_.reset(new moveit_visual_tools::MoveItVisualTools("world", "/moveit_visual_markers", planning_scene_monitor_));
+    ros::Duration(5.0).sleep(); // wait for rviz
+    visual_tools_->enableBatchPublishing(false);
+  }
+
   if (num_threads > omp_get_max_threads() || num_threads < 1)
   {
     num_threads_ = omp_get_max_threads();
@@ -96,12 +110,12 @@ GraspFilter::GraspFilter(planning_scene_monitor::PlanningSceneMonitorPtr plannin
   }
 
   // Print error if kinematic solver frame different from robot model
-  ik_frame = kin_solvers[arm_jmg_->getName()][0]->getBaseFrame();
+  ik_frame_ = kin_solvers[arm_jmg_->getName()][0]->getBaseFrame();
   robot_model::RobotState state = planning_scene_monitor_->getPlanningScene()->getCurrentState();
-  const std::string& model_frame = state.getRobotModel()->getModelFrame();
-  if (!moveit::core::Transforms::sameFrame(ik_frame, model_frame))
+  model_frame_ = state.getRobotModel()->getModelFrame();
+  if (!moveit::core::Transforms::sameFrame(ik_frame_, model_frame_))
   {
-      ROS_ERROR_STREAM("Robot model has different frame (" << model_frame << ") from kinematic solver frame (" << ik_frame << ")");
+      ROS_ERROR_STREAM("Robot model has different frame (" << model_frame_ << ") from kinematic solver frame (" << ik_frame_ << ")");
   }
 }
 
@@ -136,6 +150,25 @@ std::vector<bool> GraspFilter::filter_grasps(std::vector<geometry_msgs::Pose> po
     //   poses[grasp_id], ik_seed_state, solution, error_code); // does not check collision
     bool isValid = state->setFromIK(arm_jmg_, poses[grasp_id], timeout_, constraint_fn);
 
+    if ( visual_debug_ && isValid ){
+      trajectory_msgs::JointTrajectoryPoint point;
+      state->copyJointGroupPositions(arm_jmg_, point.positions);
+      // std::vector<trajectory_msgs::JointTrajectoryPoint> ik_solutions; // save each grasps ik solution for visualization
+      // ik_solutions.push_back(point);
+      // visual_tools_->publishIKSolutions(ik_solutions, arm_jmg_, 4.0);
+      
+      ROS_INFO("Publishing IK solutions.");
+
+      visual_tools_->publishRobotState(point.positions, arm_jmg_);
+      ros::Duration(0.5).sleep();
+      visual_tools_->trigger();
+      ros::Duration(0.5).sleep();
+      visual_tools_->trigger();
+
+      ROS_INFO_STREAM("Published IK solutions.");
+
+    }
+    
     {
       boost::mutex::scoped_lock slock(vector_lock);
       feasible[grasp_id] = isValid;
@@ -179,15 +212,26 @@ void find_orbital_poses(const std::vector<geometry_msgs::Pose>& grasp_poses,
 void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& msg)
 {
   auto start = high_resolution_clock::now();
+
   // transform all grasp poses into the IK solver frame if not already
   std::vector<geometry_msgs::Pose> poses;
-  if (moveit::core::Transforms::sameFrame(gf.ik_frame, msg.header.frame_id))
+  // for (size_t i = 0; i < msg.poses.size(); ++i)
+  // {
+    
+  //   robot_model::RobotState state = gf.planning_scene_monitor_->getPlanningScene()->getCurrentState();
+  //   Eigen::Isometry3d pose;
+  //   tf2::fromMsg(msg.poses[i], pose);
+  //   kinematics::KinematicsBaseConstPtr p = gf.kin_solvers[gf.arm_jmg_->getName()][0];
+  //   state.setToIKSolverFrame(pose, p);
+  // }
+
+  if (moveit::core::Transforms::sameFrame(gf.model_frame_, msg.header.frame_id))
   {
       poses = msg.poses;
   } else
   {
     geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
-        gf.ik_frame, msg.header.frame_id, ros::Time(0), ros::Duration(1.0));
+        gf.model_frame_, msg.header.frame_id, ros::Time(0), ros::Duration(1.0));
     for (geometry_msgs::Pose p : msg.poses) 
     {
       geometry_msgs::Pose ik_pose;
@@ -195,11 +239,13 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
       poses.push_back(ik_pose);
     }
   }
+
   auto stop = high_resolution_clock::now();
   auto duration = duration_cast<microseconds>(stop - start);
   ROS_INFO_STREAM("Transforming Grasps took: " << duration.count() << " us");
 
   start = high_resolution_clock::now();
+
   // filter grasps by kinematic feasibility
   std::vector<bool> feasible = gf.filter_grasps(poses);
 
@@ -219,6 +265,7 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
   }
 
   start = high_resolution_clock::now();
+
   // filter orbital poses by kinematic feasibility
   std::vector<geometry_msgs::Pose> o_poses;
   find_orbital_poses(filtered_poses, o_poses, gf.orbital_radius_);
@@ -227,10 +274,8 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
   duration = duration_cast<microseconds>(stop - start);
   ROS_INFO_STREAM("Finding orbital poses took: " << duration.count() << " us");
 
-
   start = high_resolution_clock::now();
   std::vector<bool> o_pose_feasible = gf.filter_grasps(o_poses);
-
 
   stop = high_resolution_clock::now();
   duration = duration_cast<microseconds>(stop - start);
@@ -239,6 +284,7 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
   start = high_resolution_clock::now();
 
   std::vector<geometry_msgs::Pose> twice_filtered_poses;
+  std::vector<geometry_msgs::Pose> orbital_twice_filtered_poses;
   std::vector<float> twice_filtered_confs;
   for (size_t i = 0; i < o_pose_feasible.size(); ++i)
   {
@@ -246,17 +292,22 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
     {
       twice_filtered_poses.push_back(filtered_poses[i]);
       twice_filtered_confs.push_back(filtered_confs[i]);
+
+      // orbital_twice_filtered_poses holds the kinematically feasible
+      // orbital poses corresponding to kinematically feasible grasp poses.
+      orbital_twice_filtered_poses.push_back(o_poses[i]);
     }
   }
 
   // publish a new Grasps message
   cl_tsgrasp::Grasps filtered_msg;
   filtered_msg.poses = twice_filtered_poses;
+  filtered_msg.orbital_poses = orbital_twice_filtered_poses; // corresponding o_poses
   filtered_msg.confs = twice_filtered_confs;
   filtered_msg.header = msg.header;
-  filtered_msg.header.frame_id = gf.ik_frame;
+  filtered_msg.header.frame_id = gf.model_frame_;
 
-  pub.publish(filtered_msg);
+  pub.publish(filtered_msg);  
 
   stop = high_resolution_clock::now();
   duration = duration_cast<microseconds>(stop - start);
@@ -278,6 +329,7 @@ int main(int argc, char **argv)
   std::string output_grasps_topic;
   int num_threads; // setting to a number < 1 or greater than omp_get_max_threads() sets to max
   double orbital_radius;
+  bool visual_debug;
 
   ros::NodeHandle rpnh(nh, parent_name);
   std::size_t error = 0;
@@ -288,6 +340,7 @@ int main(int argc, char **argv)
   error += !rosparam_shortcuts::get(parent_name, rpnh, "output_grasps_topic", output_grasps_topic);
   error += !rosparam_shortcuts::get(parent_name, rpnh, "num_threads", num_threads);
   error += !rosparam_shortcuts::get(parent_name, rpnh, "orbital_radius", orbital_radius);
+  error += !rosparam_shortcuts::get(parent_name, rpnh, "visual_debug", visual_debug);
   rosparam_shortcuts::shutdownIfError(parent_name, error);
 
   planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor = 
@@ -309,7 +362,7 @@ int main(int argc, char **argv)
   tf2_ros::Buffer tf_buffer;
   tf2_ros::TransformListener tf2_listener(tf_buffer);
 
-  GraspFilter gf(planning_scene_monitor, arm_jmg, timeout, &tf_buffer, num_threads, orbital_radius);
+  GraspFilter gf(planning_scene_monitor, arm_jmg, timeout, &tf_buffer, num_threads, orbital_radius, visual_debug);
 
   ros::Publisher pub = nh.advertise<cl_tsgrasp::Grasps>(output_grasps_topic, 1000);
 
