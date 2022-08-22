@@ -15,15 +15,18 @@
         <arg name="start_rviz" value="false"/>
     </include>
 
-    <!-- Remap point cloud -->
-    <remap from="camera/depth/points" to="/camera/depth/color/points" />
-    
+    <node pkg="topic_tools" type="relay" name="point_cloud_relayer"
+        args="passthrough/output point_cloud"
+    />
 
-<!-- temporary hack: include Realsense -->
-    <include file="$(find hacky_utils)/launch/realsense_start.launch"/>
+    <!-- Remap point cloud -->
+    <remap from="camera/depth/points" to="point_cloud" />
+    
+<!-- temporary: include Realsense -->
+    <!-- <include file="$(find hacky_utils)/launch/realsense_start.launch"/>
 
     <node pkg="tf2_ros" type="static_transform_publisher" name="camera_link_broadcaster"
-        args="0.154 0.055 0.025 0 0 0 1 left camera_depth_optical_frame" />
+        args="0.154 0.055 0.025 0 0 0 1 left camera_depth_optical_frame" /> -->
 
     <!-- Start rviz for visualization -->
     <node  pkg="rviz" type="rviz" output="screen" name="rviz" 
@@ -50,10 +53,10 @@
     </node>
 
     <!-- Node to select goal pose -->
-    <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" respawn="true" launch-prefix="xterm -hold -e "/>
+    <!-- <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" respawn="true" launch-prefix="xterm -hold -e "/> -->
 
     <!-- Node to publish orbital pose -->
-    <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" launch-prefix="xterm -hold -e " />
+    <!-- <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" launch-prefix="xterm -hold -e " /> -->
 
     <!-- Node to publish end effector pose -->
     <!-- <node pkg="cl_tsgrasp" type="publish_ee_pose.py" respawn="true" name="publish_ee_pose"  output="screen" launch-prefix="xterm -hold -e " /> -->
@@ -76,6 +79,11 @@
     <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers_unfiltered" launch-prefix="xterm -hold -e" args='--color "(255.0, 0.0, 0.0, 0.2)"' >
         <remap from="grasps" to="tsgrasp/grasps_unfiltered" />
         <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers_unfiltered" />
+    </node>
+
+    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="orbital_markers" launch-prefix="xterm -hold -e" args='--color "(255.0, 255.0, 0.0, 0.2)"' >
+        <remap from="grasps" to="bravo/orbital_grasps" />
+        <remap from="grasp_pose_markers" to="tsgrasp/orbital_grasp_markers" />
     </node>
     
     <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e" respawn="true"/>

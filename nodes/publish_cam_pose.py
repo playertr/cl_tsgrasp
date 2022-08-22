@@ -15,8 +15,9 @@ def publish_cam_pose():
         try:
             # TODO get frame name from rosparams
             # cam_tf = tf.get_transform(source_frame="camera_depth_optical_frame", target_frame="world")
+            cam_tf = tf.get_transform(source_frame="left", target_frame="world")
 
-            cam_tf = tf.get_transform(source_frame="kinect_optical_link", target_frame="world")
+            # cam_tf = tf.get_transform(source_frame="kinect_optical_link", target_frame="world")
             break
         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
             rospy.sleep(1)

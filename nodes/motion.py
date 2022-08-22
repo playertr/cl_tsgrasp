@@ -109,6 +109,9 @@ class Mover:
         pose.header.stamp = rospy.Time.now() # the timestamp may be out of date.
         self.arm_move_group_cmdr.set_pose_target(pose, end_effector_link="ee_link")
 
+        motion_goal_pub = rospy.Publisher('motion_goal', PoseStamped, queue_size=10)
+        motion_goal_pub.publish(pose)
+
         success = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
@@ -178,7 +181,7 @@ class Mover:
         print("Executing grasp.")
 
         print("\tOpening jaws.")
-        success = self.go_gripper(np.array([0.02]), wait=True)
+        success = self.go_gripper(np.array([0.03]), wait=True)
         if not success: return False
 
         print("\tMoving end effector to orbital pose.")
@@ -192,6 +195,7 @@ class Mover:
         print("\tClosing jaws.")
         success = self.go_gripper(np.array([0.0]), wait=True)
         if not success: return False
+        rospy.sleep(2)
 
         print("\tMoving end effector to orbital pose.")
         success = self.go_ee_pose(orbital_pose, wait=True)
@@ -199,6 +203,11 @@ class Mover:
 
         print("\tMoving arm to 'rest' configuration.")
         success = self.go_named_group_state('rest', wait=True)
+
+        print("\tOpening jaws.")
+        success = self.go_gripper(np.array([0.03]), wait=True)
+        if not success: return False
+
         return success
 
     def execute_grasp_closed_loop(self, orbital_pose: PoseStamped, final_pose: PoseStamped) -> bool:
@@ -374,8 +383,11 @@ class GraspChooser:
         self.best_grasp_pub = rospy.Publisher(name='/tsgrasp/final_goal_pose', 
             data_class=PoseStamped, queue_size=1)
 
-        self.best_closest_grasp_pub = rospy.Publisher(name='/tsgrasp/best_closest_grasp', 
+        self.orbital_best_grasp_pub = rospy.Publisher(name='/tsgrasp/orbital_final_goal_pose', 
             data_class=PoseStamped, queue_size=1)
+
+        # self.best_closest_grasp_pub = rospy.Publisher(name='/tsgrasp/best_closest_grasp', 
+        #     data_class=PoseStamped, queue_size=1)
 
         self.closest_grasp_lpf = None
         self.best_closest_grasp = None
@@ -388,27 +400,34 @@ class GraspChooser:
 
         confs = msg.confs
         poses = msg.poses
+        orbital_poses = msg.orbital_poses
 
         if len(confs) == 0: return
 
-        # Find best (highest confidence) grasp
+        # Find best (highest confidence) grasp and its orbital grasp
         best_grasp = PoseStamped()
         best_grasp.pose = poses[np.argmax(confs)]
         best_grasp.header = msg.header
         self.best_grasp_pub.publish(best_grasp)
         self.best_grasp = best_grasp
 
+        orbital_best_grasp = PoseStamped()
+        orbital_best_grasp.pose = orbital_poses[np.argmax(confs)]
+        orbital_best_grasp.header = msg.header
+        self.orbital_best_grasp_pub.publish(orbital_best_grasp)
+        self.orbital_best_grasp = orbital_best_grasp
+
         # Find best, closest grasp
-        if self.closest_grasp_lpf is None:
-            self.closest_grasp_lpf = ClosestBestFilter(poses, confs)
-        else:
-            self.closest_grasp_lpf.update(poses, confs, self.grasp_closeness_importance)
+        # if self.closest_grasp_lpf is None:
+        #     self.closest_grasp_lpf = ClosestBestFilter(poses, confs)
+        # else:
+        #     self.closest_grasp_lpf.update(poses, confs, self.grasp_closeness_importance)
         
-        best_closest_grasp = PoseStamped()
-        best_closest_grasp.pose = self.closest_grasp_lpf.best_grasp
-        best_closest_grasp.header = msg.header
-        self.best_closest_grasp_pub.publish(best_closest_grasp)
-        self.best_closest_grasp = best_closest_grasp
+        # best_closest_grasp = PoseStamped()
+        # best_closest_grasp.pose = self.closest_grasp_lpf.best_grasp
+        # best_closest_grasp.header = msg.header
+        # self.best_closest_grasp_pub.publish(best_closest_grasp)
+        # self.best_closest_grasp = best_closest_grasp
 
     def reset_closest_target(self, posestamped: PoseStamped):
         if posestamped.header.frame_id != self.best_closest_grasp.header.frame_id: raise ValueError
@@ -491,7 +510,7 @@ class ServoHelper:
 
         grasp_pose_filter = PoseStampedExpoFilter()
 
-        orbital_distance = 0.2
+        orbital_distance = 0.05
 
         self.grasp_chooser.reset_closest_target(final_pose)
 

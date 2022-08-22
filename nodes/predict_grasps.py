@@ -38,7 +38,7 @@ GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
 CONF_THRESHOLD  = 0
 TOP_K           = 1000
 WORLD_BOUNDS    = torch.Tensor([[-2, -2, -1], [2, 2, 1]]) # (xyz_lower, xyz_upper)
-CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 2]]) # (xyz_lower, xyz_upper)
+CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 0.4]]) # (xyz_lower, xyz_upper)
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
@@ -588,9 +588,8 @@ def depth_callback(depth_msg):
 depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
 cam_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, cam_pose_cb, queue_size=1)
 
-# r = rospy.Rate(5)
+r = rospy.Rate(5)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
-
-    # r.sleep()
+    r.sleep()

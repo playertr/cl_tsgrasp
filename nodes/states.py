@@ -383,28 +383,15 @@ class ExecuteGraspOpenLoop(smach.State):
     def __init__(self, mover: Mover):
         smach.State.__init__(self, outcomes=['grasp_executed', 'grasp_not_executed'])
         self.mover = mover
-        orbital_pose_sub = rospy.Subscriber(
-            name='/tsgrasp/orbital_pose', data_class=PoseStamped, 
-            callback=self._orbital_pose_cb, queue_size=1)
-        final_goal_pose_sub = rospy.Subscriber(
-            name='/tsgrasp/final_goal_pose', data_class=PoseStamped, 
-            callback=self._goal_pose_cb, queue_size=1)
-
-    def _orbital_pose_cb(self, msg):
-        self._orbital_pose = msg
-
-    def _goal_pose_cb(self, msg):
-        self._final_goal_pose = msg
 
     def execute(self, userdata):
         rospy.loginfo('Executing state EXECUTE_GRASP_OPEN_LOOP')
-        if self._orbital_pose is None or self._final_goal_pose is None:
+        if self.mover.grasp_chooser.best_grasp is None:
             rospy.logerr('Orbital or final pose not initialized.')
             return 'grasp_not_executed'
 
-        success = self.mover.execute_grasp_open_loop(self._orbital_pose, self._final_goal_pose)
+        success = self.mover.execute_grasp_open_loop(self.mover.grasp_chooser.orbital_best_grasp, self.mover.grasp_chooser.best_grasp)
         return 'grasp_executed' if success else 'grasp_not_executed'
-
 
 class ExecuteGraspClosedLoop(smach.State):
 

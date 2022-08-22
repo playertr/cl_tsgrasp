@@ -6,5 +6,5 @@ kin_feas_filter:
   output_grasps_topic: tsgrasp/grasps_filtered
   num_threads: 6
   # setting to a number < 1 or greater than omp_get_max_threads() sets to max
-  orbital_radius: 0.1
-  
+  orbital_radius: 0.13
+  visual_debug: false

@@ -225,13 +225,14 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
   //   state.setToIKSolverFrame(pose, p);
   // }
 
+  geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
+        gf.model_frame_, msg.header.frame_id, ros::Time(0), ros::Duration(1.0));
+
   if (moveit::core::Transforms::sameFrame(gf.model_frame_, msg.header.frame_id))
   {
       poses = msg.poses;
   } else
   {
-    geometry_msgs::TransformStamped tf = gf.tf_buffer_->lookupTransform(
-        gf.model_frame_, msg.header.frame_id, ros::Time(0), ros::Duration(1.0));
     for (geometry_msgs::Pose p : msg.poses) 
     {
       geometry_msgs::Pose ik_pose;
@@ -299,13 +300,40 @@ void grasps_cb(GraspFilter& gf, ros::Publisher& pub, const cl_tsgrasp::Grasps& m
     }
   }
 
+  // transform poses and orbital poses back into camera frame
+  // create an inverted transform
+  tf2::Transform transform;
+  tf2::fromMsg(tf.transform, transform);
+  tf2::Transform inv_tf = transform.inverse();
+  geometry_msgs::Transform inv_tf_msg = tf2::toMsg(inv_tf);
+  geometry_msgs::TransformStamped inv_tf_msg_stamped;
+  inv_tf_msg_stamped.transform = inv_tf_msg;
+  inv_tf_msg_stamped.header = tf.header;
+  inv_tf_msg_stamped.header.frame_id = tf.child_frame_id;
+  inv_tf_msg_stamped.child_frame_id = tf.header.frame_id;
+  
+  std::vector<geometry_msgs::Pose> final_poses_original_frame;
+  for (geometry_msgs::Pose p : twice_filtered_poses) 
+  {
+    geometry_msgs::Pose pose;
+    tf2::doTransform(p, pose, inv_tf_msg_stamped);
+    final_poses_original_frame.push_back(pose);
+  }
+
+  std::vector<geometry_msgs::Pose> orbital_final_poses_original_frame;
+  for (geometry_msgs::Pose p : orbital_twice_filtered_poses) 
+  {
+    geometry_msgs::Pose pose;
+    tf2::doTransform(p, pose, inv_tf_msg_stamped);
+    orbital_final_poses_original_frame.push_back(pose);
+  }
+
   // publish a new Grasps message
   cl_tsgrasp::Grasps filtered_msg;
-  filtered_msg.poses = twice_filtered_poses;
-  filtered_msg.orbital_poses = orbital_twice_filtered_poses; // corresponding o_poses
+  filtered_msg.poses = final_poses_original_frame;
+  filtered_msg.orbital_poses = orbital_final_poses_original_frame; // corresponding o_poses
   filtered_msg.confs = twice_filtered_confs;
   filtered_msg.header = msg.header;
-  filtered_msg.header.frame_id = gf.model_frame_;
 
   pub.publish(filtered_msg);  
 

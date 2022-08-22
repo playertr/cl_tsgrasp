@@ -9,7 +9,7 @@ import numpy as np
 
 ## constants
 # TODO change to rosparam
-ORBIT_RADIUS = 0.1 # distance to initially orbit object before terminal homing
+ORBIT_RADIUS = 0.05 # distance to initially orbit object before terminal homing
 
 orbital_pose_pub = rospy.Publisher('/tsgrasp/orbital_pose', PoseStamped, queue_size=1)
 

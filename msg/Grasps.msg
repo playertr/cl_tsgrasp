@@ -4,4 +4,5 @@
 
 Header header # sequence number, timestamp,frame ID
 geometry_msgs/Pose[] poses # N grasp poses expressed in this frame
+geometry_msgs/Pose[] orbital_poses # N orbital_poses, only published occasionally
 float32[] confs # N corresponding grasp confidences in [0, 1]
