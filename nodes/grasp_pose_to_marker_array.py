@@ -29,8 +29,10 @@ def gripper_marker():
 def poses_cb(msg):
     global color
 
-    poses = msg.poses[:500]
-    confs = msg.confs[:500]
+    total_markers = 1000
+    skip = int(len(msg.poses) / total_markers)
+    poses = msg.poses[::skip]
+    confs = msg.confs[::skip]
 
     if len(confs) == 0: return
     
@@ -46,7 +48,7 @@ def poses_cb(msg):
     for i, pose in enumerate(poses):
         marker = gripper_marker()
         marker.id = i
-        marker.lifetime = rospy.Duration(0.25)
+        marker.lifetime = rospy.Duration()
 
         if color == 'confs':
             marker.color.a = 0.5
