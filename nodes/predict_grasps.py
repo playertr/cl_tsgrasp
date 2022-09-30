@@ -37,10 +37,10 @@ except ImportError as e:
 QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
-CONF_THRESHOLD  = 0
+CONF_THRESHOLD  = 0.0
 TOP_K           = 45000 #1000
 # WORLD_BOUNDS    = torch.Tensor([[-2, -2, -1], [2, 2, 1]]) # (xyz_lower, xyz_upper)
-WORLD_BOUNDS    = torch.Tensor([[-2, -2, -2], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+WORLD_BOUNDS    = torch.Tensor([[-2, -2, 0.05], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 0.4]]) # (xyz_lower, xyz_upper)
 OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
 
@@ -369,9 +369,9 @@ def filter_grasps(grasps, confs, widths):
 
     # furthest point sampling
     # # furthest point sampling by position
-    # pos = grasps[:,:3,3]
-    # _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
-    # selected_idcs = selected_idcs.squeeze()
+    pos = grasps[:,:3,3]
+    _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
+    selected_idcs = selected_idcs.squeeze()
 
     # grasps = grasps[selected_idcs]
     # confs = confs[selected_idcs]
@@ -484,9 +484,9 @@ def find_grasps():
             pts             = downsample_xyz(pts, PTS_PER_FRAME)
             if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
-        with TimeIt('Filter Point Cloud Outliers'):
-            pts             = filter_few_neighbors(pts)
-            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+        # with TimeIt('Filter Point Cloud Outliers'):
+        #     pts             = filter_few_neighbors(pts)
+        #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Transform the points into the frame of the last camera perspective.
         with TimeIt('Transform to Camera Frame'):
