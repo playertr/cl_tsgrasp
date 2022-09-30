@@ -2,7 +2,9 @@
 # shebang is for the Python3 environment with the network dependencies
 
 import sys, os
-sys.path.append(os.environ['NN_SRC_DIR'])
+from pathlib import Path
+pkg_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(pkg_root / 'nn' / 'tsgrasp'))
 
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -11,19 +13,18 @@ import torch
 cfg_str = """
 training:
   gpus: 1
-  batch_size: 10
-  max_epochs: 100
+  batch_size: 12
+  max_epochs: 200
   optimizer:
     learning_rate: 0.00025
     lr_decay: 0.99
   animate_outputs: false
   make_sc_curve: false
-  use_wandb: false
+  use_wandb: true
   wandb:
     project: TSGrasp
     experiment: tsgrasp_scene
-    notes: First run attempting table scene data.
-  save_animations: false
+    notes: Table scene data with random orbital yaw speed
 model:
   _target_: tsgrasp.net.lit_tsgraspnet.LitTSGraspNet
   model_cfg:
@@ -43,9 +44,9 @@ model:
 data:
   _target_: tsgrasp.data.lit_scenerenderer_dm.LitTrajectoryDataset
   data_cfg:
-    num_workers: 0
+    num_workers: 4
     data_proportion_per_epoch: 1
-    dataroot: /home/playert/Research/contact_graspnet/acronym
+    dataroot: /scratch/playert/workdir/cgn_data
     frames_per_traj: 4
     points_per_frame: 45000
     min_pitch: 0.0
@@ -61,12 +62,13 @@ data:
       gaussian_kernel: 0
       sigma: 0.001
 
-ckpt_path: tsgrasp_scene_4_frames/model.ckpt
+ckpt_path: tsgrasp_scene_4_random_yaw/model.ckpt
 """
 
 def load_model():
     cfg = OmegaConf.create(cfg_str)
     pl_model = instantiate(cfg.model, training_cfg=cfg.training)
-    path = os.environ['NN_CKPT_DIR'] + cfg.ckpt_path
+    path = pkg_root / 'nn' / 'ckpts' / cfg.ckpt_path
+    print(f"Loading weights from {path}")
     pl_model.load_state_dict(torch.load(path)['state_dict'])
     return pl_model
