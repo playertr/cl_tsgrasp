@@ -1,4 +1,5 @@
-#! /home/playert/miniconda3/envs/contact_graspnet/bin/python
+#! /home/playert/miniconda3/envs/cgn3/bin/python
+# /home/playert/miniconda3/envs/contact_graspnet/bin/python
 
 try:
 
@@ -34,6 +35,7 @@ try:
     from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
     import math
     # from pytorch3d.ops import sample_farthest_points
+    from pytorch3d.ops import knn_points
     from typing import List
     # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
 except ImportError as e:
@@ -51,6 +53,7 @@ TOP_K           = 45000 #1000
 # WORLD_BOUNDS    = torch.Tensor([[-2, -2, -1], [2, 2, 1]]) # (xyz_lower, xyz_upper)
 WORLD_BOUNDS    = torch.Tensor([[-2, -2, -2], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 0.4]]) # (xyz_lower, xyz_upper)
+OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
 
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
@@ -315,7 +318,8 @@ def bound_point_cloud_world(pts, poses):
 def downsample_xyz(pts: List[torch.Tensor], pts_per_frame: int) -> List[torch.Tensor]:
     ## downsample point clouds proportion of points -- will that result in same sampling distribution?
     for i in range(len(pts)):
-        pts_to_keep = int(pts_per_frame / 90_000 * len(pts[i]))
+        # pts_to_keep = int(pts_per_frame / 90_000 * len(pts[i]))
+        pts_to_keep= pts_per_frame
         idxs = torch.randperm(
             len(pts[i]), dtype=torch.int32, device=pts[i].device
         )[:pts_to_keep].sort()[0].long()
@@ -437,6 +441,15 @@ def ensure_grasp_y_axis_upward(grasps: torch.Tensor) -> torch.Tensor:
     grasps[:,:3,:3] = torch.bmm(grasps[:,:3,:3], tfs)
     return grasps
 
+def filter_few_neighbors(pts):
+    # remove points with few neighbors
+    filtered_pts = []
+    for pcl in pts:
+        pcd = pcl.unsqueeze(0)
+        nn_dists, nn_idx, nn = knn_points(pcd, pcd, K=10, return_nn=False, return_sorted=False)
+        pcl_filtered = pcl[nn_dists[0,:,1:].mean(1) < OUTLIER_THRESHOLD]
+        filtered_pts.append(pcl_filtered)
+    return filtered_pts
     
 @torch.inference_mode()
 def find_grasps():
@@ -489,6 +502,10 @@ def find_grasps():
         # Downsample the points with uniform probability.
         with TimeIt('Downsample Points'):
             pts             = downsample_xyz(pts, PTS_PER_FRAME)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+
+        with TimeIt('Filter Point Cloud Outliers'):
+            pts             = filter_few_neighbors(pts)
             if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Transform the points into the frame of the last camera perspective.
@@ -575,7 +592,7 @@ def depth_callback(depth_msg):
 
 # subscribe to throttled point cloud
 # depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
-depth_sub = rospy.Subscriber('/camera/depth/color/points', PointCloud2, depth_callback, queue_size=1)
+depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
 cam_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, cam_pose_cb, queue_size=1)
 
 r = rospy.Rate(5)
