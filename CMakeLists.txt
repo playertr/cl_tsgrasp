@@ -25,6 +25,7 @@ find_package(catkin REQUIRED COMPONENTS
     moveit_core
     moveit_ros_planning_interface
     rosparam_shortcuts
+    moveit_visual_tools
 )
 
 ## System dependencies are found with CMake's conventions

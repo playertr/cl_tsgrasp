@@ -152,7 +152,7 @@ class ObjectDataset():
 
         # Find the raw filepaths.
         if split in ["train", "val", "test"]:
-            self._paths = [os.path.join(self.h5_dir, f) for f in os.listdir(self.h5_dir)]
+            self._paths = [os.path.join(self.h5_dir, f) for f in sorted(os.listdir(self.h5_dir))]
         else:
             raise ValueError("Split %s not recognised" % split)
 

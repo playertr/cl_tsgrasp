@@ -10,7 +10,7 @@ from matplotlib import cm
 import argparse
 
 color = 'confs'
-marker_array_pub = rospy.Publisher('grasp_pose_markers', MarkerArray, queue_size=100)
+marker_array_pub = rospy.Publisher('grasp_pose_markers', MarkerArray, queue_size=1)
     
 def gripper_marker():
     marker = Marker()
@@ -29,27 +29,37 @@ def gripper_marker():
 def poses_cb(msg):
     global color
 
-    if len(msg.confs) == 0: return
+    total_markers = 1000
+    skip = int(len(msg.poses) / total_markers)
+    if skip > 0:
+        poses = msg.poses[::skip]
+        confs = msg.confs[::skip]
+    else:
+        poses = msg.poses
+        confs = msg.confs
+
+    if len(confs) == 0: return
     
     viridis = cm.get_cmap('viridis', 12)
 
-    _range = max(msg.confs) - min(msg.confs)
+    _range = max(confs) - min(confs)
     _range = 1 if _range == 0 else _range
     cmap = lambda x: viridis(
-        (x - min(msg.confs))/(_range)
+        (x - min(confs))/(_range)
     ) # normalize linearly
     
     marker_array = MarkerArray()
-    for i, pose in enumerate(msg.poses[:500]):
+    for i, pose in enumerate(poses):
         marker = gripper_marker()
         marker.id = i
+        marker.lifetime = rospy.Duration()
 
         if color == 'confs':
             marker.color.a = 0.5
-            color = cmap(msg.confs[i])
-            marker.color.r = color[0]
-            marker.color.g = color[1]
-            marker.color.b = color[2]
+            this_color = cmap(confs[i])
+            marker.color.r = this_color[0]
+            marker.color.g = this_color[1]
+            marker.color.b = this_color[2]
         else:
             marker.color.r = color[0]
             marker.color.g = color[1]
@@ -61,6 +71,7 @@ def poses_cb(msg):
         marker.pose.position = pose.position
         marker_array.markers.append(marker)
 
+    print("Publishing marker array.")
     marker_array_pub.publish(marker_array)
 
 if __name__ == "__main__":

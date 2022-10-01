@@ -2,37 +2,14 @@
 
 import moveit_commander
 import sys
+import time
 
-import geometry_msgs.msg
-from moveit_commander.conversions import pose_to_list
+from geometry_msgs.msg import PoseStamped
 import numpy as np
 
 import rospy
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-        
-
-
-def all_close(goal, actual, tolerance):
-    """
-    Convenience method for testing if a list of values are within a tolerance of
-    their counterparts in another list
-    @param: goal       A list of floats, a Pose or a PoseStamped
-    @param: actual     A list of floats, a Pose or a PoseStamped
-    @param: tolerance  A float @returns: bool
-    """
-    all_equal = True
-    if type(goal) is list:
-        for index in range(len(goal)):
-            if abs(actual[index] - goal[index]) > tolerance:
-                return False
-
-    elif type(goal) is geometry_msgs.msg.PoseStamped:
-        return all_close(goal.pose, actual.pose, tolerance)
-
-    elif type(goal) is geometry_msgs.msg.Pose:
-        return all_close(pose_to_list(goal), pose_to_list(actual), tolerance)
-
-    return True
+from utils import TFHelper
 
 class Mover:
     """Wrapper around MoveIt functionality for the arm."""
@@ -44,6 +21,7 @@ class Mover:
     gripper_pub: rospy.Publisher
     box_name: str = None
     grasping_group_name: str
+    tfh: TFHelper
 
     def __init__(self):
         moveit_commander.roscpp_initialize(sys.argv)
@@ -54,41 +32,45 @@ class Mover:
 
         self.scene = moveit_commander.PlanningSceneInterface(synchronous=True) # might break the non-blocking promise
         self.gripper_pub = rospy.Publisher('hand_position_controller/command', data_class=JointTrajectory, queue_size=1)
-        # self.add_ground_plane_to_planning_scene()
+        self.add_ground_plane_to_planning_scene()
 
         self.arm_move_group_cmdr.set_planner_id("RRTConnect")
 
-    def add_ground_plane_to_planning_scene(self):
-        """Add a box object to the PlanningScene so that collisions with the 
-        hand are ignored. Otherwise, no collision-free trajectories can be found 
-        after an object is picked up."""
+        self.tfh = TFHelper()
 
-        box_pose = geometry_msgs.msg.PoseStamped()
+        self.grasp_chooser = GraspChooser(self.tfh)
+
+    def add_ground_plane_to_planning_scene(self):
+        """Add a box object to the PlanningScene to prevent paths that collide
+        with the ground. """
+
+        box_pose = PoseStamped()
         box_pose.header.frame_id = self.arm_robot_cmdr.get_planning_frame()
         box_pose.pose.orientation.w = 1.0
-        box_pose.pose.position.z = -0.5  # above the hand frame
+        box_pose.pose.position.z = -0.501
         box_name = "ground_plane"
         self.scene.add_box(box_name, box_pose, size=(3, 3, 1))
 
+    def get_ee_pose(self):
+        return self.arm_move_group_cmdr.get_current_pose()
+
     def go_joints(self, joints: np.ndarray, wait: bool = True):
-        """Move robot to the given 7-element joint configuration.
+        """Move robot to the given joint configuration.
 
         Args:
             joints (np.ndarray): joint angles
             wait (bool): whether to block until finished 
         """
-        joint_positions = self.arm_move_group_cmdr.get_current_joint_values() # ensure current
-        plan = self.arm_move_group_cmdr.go(joints, wait=wait)
+        success = self.arm_move_group_cmdr.go(joints, wait=wait)
         self.arm_move_group_cmdr.stop()
-        return plan
+        return success
 
-
-    def go_gripper(self, pos: np.ndarray, wait: bool = True):
-        """Move the gripper fingers to the two given positions.
+    def go_gripper(self, pos: np.ndarray, wait: bool = True) -> bool:
+        """Move the gripper fingers to the given actuator value.
 
         Args:
-            pos (np.ndarray): gripper positions, in meters from center
-            wait (bool): whether to block until finished
+            pos (np.ndarray): desired position of `bravo_axis_a`
+            wait (bool): whether to wait until it's probably done
         """
         jt = JointTrajectory()
         jt.joint_names = ['bravo_axis_a']
@@ -97,30 +79,36 @@ class Mover:
         jtp = JointTrajectoryPoint()
         jtp.positions = pos
         jtp.time_from_start = rospy.Duration(secs=3)
-
         jt.points.append(jtp)
 
         self.gripper_pub.publish(jt)
+
+        if wait:
+            time.sleep(3)
+
         return True
 
-    def go_ee_pose(self, pose: geometry_msgs.msg.Pose, wait: bool = True):
+    def go_ee_pose(self, pose: PoseStamped, wait: bool = True) -> bool:
         """Move the end effector to the given pose.
 
         Args:
             pose (geometry_msgs.msg.Pose): desired pose for end effector
             wait (bool): whether to block until finished
         """
-        # self.arm_move_group_cmdr.set_goal_tolerance(0.01)
-        # self.arm_move_group_cmdr.set_planning_time(10.0)
-        self.arm_move_group_cmdr.set_pose_target(pose)
-        print(f"Attempting to go to pose: \n{pose}")
-        # self.arm_move_group_cmdr.set_goal_tolerance(0.1)
-        plan = self.arm_move_group_cmdr.go(wait=wait)
+
+        pose.header.stamp = rospy.Time.now() # the timestamp may be out of date.
+        self.arm_move_group_cmdr.set_pose_target(pose, end_effector_link="ee_link")
+
+        motion_goal_pub = rospy.Publisher('motion_goal', PoseStamped, queue_size=10)
+        motion_goal_pub.publish(pose)
+
+        success = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
         self.arm_move_group_cmdr.clear_pose_targets()
-        return plan
+
+        return success
     
-    def go_named_group_state(self, state: str, wait: bool = True):
+    def go_named_group_state(self, state: str, wait: bool = True) -> bool:
         """Move the arm group to a named state from the SRDF.
 
         Args:
@@ -128,12 +116,10 @@ class Mover:
             wait (bool, optional): whether to block until finished. Defaults to True.
         """
         self.arm_move_group_cmdr.set_named_target(state)
-        plan = self.arm_move_group_cmdr.go(wait=wait)
+        success = self.arm_move_group_cmdr.go(wait=wait)
         self.arm_move_group_cmdr.stop()
-        return plan
 
-    def get_ee_pose(self):
-        return self.arm_move_group_cmdr.get_current_pose()
+        return success
 
     def add_object_for_pickup(self):
         """Add a box object to the PlanningScene so that collisions with the 
@@ -142,7 +128,7 @@ class Mover:
 
         eef_link = self.arm_move_group_cmdr.get_end_effector_link()
 
-        box_pose = geometry_msgs.msg.PoseStamped()
+        box_pose = PoseStamped()
         box_pose.header.frame_id = "ee_link"
         box_pose.pose.orientation.w = 1.0
         box_pose.pose.position.z = 0.11  # above the hand frame
@@ -164,3 +150,109 @@ class Mover:
             self.box_name = None
         else:
             raise ValueError("No box was added to the planning scene. Did you call add_object_for_pickup?")
+    
+    def execute_grasp_open_loop(self, orbital_pose: PoseStamped, final_pose: PoseStamped) -> bool:
+        """Execute an open loop grasp by planning and executing a sequence of motions in turn:
+           1) Open the jaws
+           2) Move the end effector the the orbital pose
+           3) Move the end effector to the final pose
+           4) Close the jaws
+           5) Move the end effector to the orbital pose
+           6) Move the arm to the 'rest' configuration
+
+        Args:
+            orbital_pose (PoseStamped): the pre-grasp orbital pose of the end effector
+            final_pose (PoseStamped): the end effector pose in which to close the jaws
+
+        Returns:
+            bool: whether every step succeeded according to MoveIt
+        """
+
+        print("Executing grasp.")
+
+        print("\tOpening jaws.")
+        success = self.go_gripper(np.array([0.03]), wait=True)
+        if not success: return False
+
+        print("\tMoving end effector to orbital pose.")
+        success = self.go_ee_pose(orbital_pose, wait=True)
+        if not success: return False
+
+        print("\tMoving end effector to final pose.")
+        success = self.go_ee_pose(final_pose, wait=True)
+        if not success: return False
+
+        print("\tClosing jaws.")
+        success = self.go_gripper(np.array([0.0]), wait=True)
+        if not success: return False
+        rospy.sleep(2)
+
+        print("\tMoving end effector to orbital pose.")
+        success = self.go_ee_pose(orbital_pose, wait=True)
+        if not success: return False
+
+        print("\tMoving arm to 'rest' configuration.")
+        success = self.go_named_group_state('rest', wait=True)
+
+        print("\tOpening jaws.")
+        success = self.go_gripper(np.array([0.03]), wait=True)
+        if not success: return False
+
+        return success
+
+from cl_tsgrasp.msg import Grasps
+class GraspChooser:
+
+    final_goal_pose = None
+    grasp_lpf = None
+
+    def __init__(self, tfh: TFHelper):
+
+        self.tfh = tfh
+
+        grasp_sub = rospy.Subscriber(name='/tsgrasp/grasps', 
+            data_class=Grasps, callback=self.grasp_cb, queue_size=1)
+
+        self.best_grasp_pub = rospy.Publisher(name='/tsgrasp/final_goal_pose', 
+            data_class=PoseStamped, queue_size=1)
+
+        self.orbital_best_grasp_pub = rospy.Publisher(name='/tsgrasp/orbital_final_goal_pose', 
+            data_class=PoseStamped, queue_size=1)
+
+        self.closest_grasp_lpf = None
+        self.best_closest_grasp = None
+        self.best_grasp = None
+
+        self.grasp_closeness_importance = 0.5
+
+    def grasp_cb(self, msg):
+        """Identify the (best) and (best, closest) grasps in the Grasps message and publish them."""
+
+        confs = msg.confs
+        poses = msg.poses
+        orbital_poses = msg.orbital_poses
+
+        if len(confs) == 0: return
+
+        # Find best (highest confidence) grasp and its orbital grasp
+        best_grasp = PoseStamped()
+        best_grasp.pose = poses[np.argmax(confs)]
+        best_grasp.header = msg.header
+        self.best_grasp_pub.publish(best_grasp)
+        self.best_grasp = best_grasp
+
+        orbital_best_grasp = PoseStamped()
+        orbital_best_grasp.pose = orbital_poses[np.argmax(confs)]
+        orbital_best_grasp.header = msg.header
+        self.orbital_best_grasp_pub.publish(orbital_best_grasp)
+        self.orbital_best_grasp = orbital_best_grasp
+
+    def reset_closest_target(self, posestamped: PoseStamped):
+        if posestamped.header.frame_id != self.best_closest_grasp.header.frame_id: raise ValueError
+        self.closest_grasp_lpf.best_grasp = posestamped.pose
+
+    def get_best_grasp(self):
+        return self.best_grasp
+    
+    def get_best_closest_grasp(self):
+        return self.best_closest_grasp

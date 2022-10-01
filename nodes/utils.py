@@ -1,11 +1,11 @@
 import rospy
 import tf2_ros
-import tf2_geometry_msgs
 import numpy as np
+import time
 
 ## tf2 abstraction
 # https://gitlab.msu.edu/av/av_notes/-/blob/master/ROS/Coordinate_Transforms.md
-class TransformFrames():
+class TFHelper():
     def __init__(self):
         ''' Create a buffer of transforms and update it with TransformListener '''
         self.tfBuffer = tf2_ros.Buffer()           # Creates a frame buffer
@@ -20,11 +20,9 @@ class TransformFrames():
             raise e
         return trans     # Type: TransformStamped
 
-    def pose_transform(self, pose_s, target_frame='odom'):
+    def transform_pose(self, pose_s, target_frame='odom'):
         ''' pose_s: PoseStamped will be transformed to target_frame '''
-        trans = self.get_transform( pose_s.header.frame_id, target_frame )
-        pose_t = tf2_geometry_msgs.do_transform_pose(pose_s, trans)
-        return pose_t
+        return self.tfBuffer.transform(pose_s, target_frame)
 
 def se3_dist(p1, p2):
     """
@@ -33,4 +31,17 @@ def se3_dist(p1, p2):
     return np.linalg.norm(np.array([
         p2.position.x - p1.position.x, p2.position.y - p1.position.y, p2.position.z - p1.position.z]))
 
-        
+class TimeIt:
+    def __init__(self, s):
+        self.s = s
+        self.t0 = None
+        self.t1 = None
+        self.print_output = True
+
+    def __enter__(self):
+        self.t0 = time.time()
+
+    def __exit__(self, t, value, traceback):
+        self.t1 = time.time()
+        if self.print_output:
+            print('%s: %s' % (self.s, self.t1 - self.t0))

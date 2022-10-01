@@ -1,15 +1,11 @@
-#! /home/playert/miniconda3/envs/tsgrasp/bin/python
-# shebang is for the Python3 environment with the network dependencies
+To run this model, first set the tsgrasp commit via
 
-import sys, os
-from pathlib import Path
-pkg_root = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(pkg_root / 'nn' / 'tsgrasp'))
+```
+git checkout 9e701f2ff1055de5af0ca5de8a81ded38a9fa3f4
+```
 
-from hydra.utils import instantiate
-from omegaconf import OmegaConf
-import torch
-
+and use
+```
 cfg_str = """
 training:
   gpus: 1
@@ -64,11 +60,6 @@ data:
 
 ckpt_path: tsgrasp_scene_4_random_yaw/model.ckpt
 """
+```
 
-def load_model():
-    cfg = OmegaConf.create(cfg_str)
-    pl_model = instantiate(cfg.model, training_cfg=cfg.training)
-    path = pkg_root / 'nn' / 'ckpts' / cfg.ckpt_path
-    print(f"Loading weights from {path}")
-    pl_model.load_state_dict(torch.load(path)['state_dict'])
-    return pl_model
+artifact playertr/TSGrasp/model-1rm21nzr:v54

@@ -1,8 +1,11 @@
 try:
     # tsgrasp dependencies
     import sys, os
-    sys.path.append(os.environ['CL_TSGRASP_PKG_ROOT'])
+    from pathlib import Path
+    pkg_root = Path(__file__).parent.parent.resolve()
+    sys.path.insert(0, str(pkg_root))
     from nn.load_model import load_model
+    from nodes.utils import TFHelper, TimeIt
 
     # ROS dependencies
     import rospy
@@ -23,21 +26,24 @@ try:
     from kornia.geometry.conversions import quaternion_to_rotation_matrix, rotation_matrix_to_quaternion, QuaternionCoeffOrder
     import math
     import MinkowskiEngine as ME
-    from pytorch3d.ops import sample_farthest_points
+    from pytorch3d.ops import sample_farthest_points, knn_points
     from typing import List
     # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
+
 except ImportError as e:
     print(e)
-    print("roslaunch must invoke this script using the NN_CONDA_PATH specified in config/machine_setup.bash:")
+    print("roslaunch must invoke this script using the NN_CONDA_PATH environment variable.")
     print("\t\t")
 
 ## global constants
 QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
-GRIPPER_DEPTH   = 0.1366 # 0.1034 for panda
-CONF_THRESHOLD  = 0 #0.5
-TOP_K           = 400
-BOUNDS          = torch.Tensor([[-2, -2, 0], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
+CONF_THRESHOLD  = 0.0
+TOP_K           = 45000
+WORLD_BOUNDS    = torch.Tensor([[-2, -2, 0.05], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 0.4]]) # (xyz_lower, xyz_upper)
+OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
 
 TF_ROLL, TF_PITCH, TF_YAW = 0, 0, math.pi/2
 TF_X, TF_Y, TF_Z = 0, 0, 0
@@ -58,29 +64,7 @@ queue = deque(maxlen=QUEUE_LEN) # FIFO queue, right side is most recent
 queue_mtx = Lock()
 latest_header = Header()
 
-ee_pose_msg = None
-
-def ee_pose_cb(msg):
-    global ee_pose_msg
-    ee_pose_msg = msg
-
-import time
-class TimeIt:
-    def __init__(self, s):
-        self.s = s
-        self.t0 = None
-        self.t1 = None
-        self.print_output = True
-
-    def __enter__(self):
-        self.t0 = time.time()
-
-    def __exit__(self, t, value, traceback):
-        # torch.cuda.synchronize()
-        self.t1 = time.time()
-        if self.print_output:
-            print('%s: %s' % (self.s, self.t1 - self.t0))
-
+tf_helper = TFHelper()
 
 # https://stackoverflow.com/questions/59387182/construct-a-rotation-matrix-in-pytorch
 #@torch.jit.script
@@ -270,12 +254,26 @@ def in_bounds(world_pts, BOUNDS):
     )
     return in_bounds
 
-def bound_point_cloud(pts, poses):
+def bound_point_cloud_cam(pts, poses):
+    """Bound the point cloud in the camera frame."""
+    for i, pose in zip(range(len(pts)), poses):
+        valid = in_bounds(pts[i], CAM_BOUNDS)
+        pts[i] = pts[i][valid]
+    
+    ## ensure nonzero
+    if sum(len(pt) for pt in pts) == 0:
+        print("No points in bounds")
+        return
+
+    return pts
+
+def bound_point_cloud_world(pts, poses):
+    """Bound the point cloud in the world frame."""
     for i, pose in zip(range(len(pts)), poses):
         world_pc = transform_vec(
             pts[i].unsqueeze(0), pose.unsqueeze(0)
         )[0]
-        valid = in_bounds(world_pc, BOUNDS)
+        valid = in_bounds(world_pc, WORLD_BOUNDS)
         pts[i] = pts[i][valid]
     
     ## ensure nonzero
@@ -325,35 +323,39 @@ def identify_grasps(pts):
         breakpoint()
         print('debug')
 
-    return grasps, confs
+    return grasps, confs, grasp_offset
 
-def filter_grasps(grasps, confs):
+def filter_grasps(grasps, confs, widths):
 
     # confidence thresholding
-    grasps = grasps[confs.squeeze() > CONF_THRESHOLD]
-    confs = confs.squeeze()[confs.squeeze() > CONF_THRESHOLD]
+    idcs = confs.squeeze() > CONF_THRESHOLD
+    grasps = grasps[idcs]
+    confs = confs.squeeze()[idcs]
+    widths = widths.squeeze()[idcs]
 
     if grasps.shape[0] == 0 or confs.shape[0] == 0:
-        return None, None
+        return None, None, None
 
     # top-k selection
-    vals, top_idcs = torch.topk(confs.squeeze(), k=min(TOP_K, confs.squeeze().numel()), sorted=True)
+    vals, top_idcs = torch.topk(confs.squeeze(), k=min(100*TOP_K, confs.squeeze().numel()), sorted=True)
     grasps = grasps[top_idcs]
     confs = confs[top_idcs]
+    widths = widths[top_idcs]
 
     if grasps.shape[0] == 0:
-        return None, None
+        return None, None, None
 
     # furthest point sampling
-    # # furthest point sampling by position
+    # furthest point sampling by position
     pos = grasps[:,:3,3]
     _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
     selected_idcs = selected_idcs.squeeze()
 
-    # grasps = grasps[selected_idcs]
-    # confs = confs[selected_idcs]
+    grasps = grasps[selected_idcs]
+    confs = confs[selected_idcs]
+    widths = widths[selected_idcs]
 
-    return grasps, confs
+    return grasps, confs, widths
 
 def ensure_grasp_y_axis_upward(grasps: torch.Tensor) -> torch.Tensor:
     """Flip grasps with their Y-axis pointing downwards by 180 degrees about the wrist (z) axis, 
@@ -398,10 +400,22 @@ def ensure_grasp_y_axis_upward(grasps: torch.Tensor) -> torch.Tensor:
     grasps[:,:3,:3] = torch.bmm(grasps[:,:3,:3], tfs)
     return grasps
 
-    
+def filter_few_neighbors(pts):
+    # remove points with few neighbors
+    filtered_pts = []
+    for pcl in pts:
+        pcd = pcl.unsqueeze(0)
+        nn_dists, nn_idx, nn = knn_points(pcd, pcd, K=10, return_nn=False, return_sorted=False)
+        pcl_filtered = pcl[nn_dists[0,:,1:].mean(1) < OUTLIER_THRESHOLD]
+        filtered_pts.append(pcl_filtered)
+    return filtered_pts
+
 @torch.inference_mode()
 def find_grasps():
     global queue, device, queue_mtx
+    with queue_mtx:
+        if len(queue) != QUEUE_LEN: return
+    
 
     with TimeIt("FIND_GRASPS() fn: "):
         with TimeIt('Unpack pointclouds'):
@@ -431,11 +445,16 @@ def find_grasps():
             header = msgs[-1].header
 
         ## Processing pipeline
-
         # Start with pts, a list of Torch point clouds.
-        # Remove points that are outside of the boundaries in the global frame.
+
+        # Remove points that are outside of the boundaries in the camera frame.
         with TimeIt('Bound Point Cloud'):
-            pts             = bound_point_cloud(pts, poses)
+            pts             = bound_point_cloud_cam(pts, poses)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+
+        # # Remove points that are outside of the boundaries in the global frame.
+        with TimeIt('Bound Point Cloud'):
+            pts             = bound_point_cloud_world(pts, poses)
             if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Downsample the points with uniform probability.
@@ -443,19 +462,23 @@ def find_grasps():
             pts             = downsample_xyz(pts, PTS_PER_FRAME)
             if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
+        # with TimeIt('Filter Point Cloud Outliers'):
+        #     pts             = filter_few_neighbors(pts)
+        #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
+
         # Transform the points into the frame of the last camera perspective.
         with TimeIt('Transform to Camera Frame'):
             pts             = transform_to_camera_frame(pts, poses)
-            if pts is None or any(len(pcl) == 0 for pcl in pts): return
+            if pts is None or any(len(pcl) < 2 for pcl in pts): return # bug with length-one pcs
 
         # Run the NN to identify grasp poses and confidences.
         with TimeIt('Find Grasps'):
-            grasps, confs   = identify_grasps(pts)
-            all_confs       = confs.clone() # keep the pointwise confs for plotting later
+            grasps, confs, widths   = identify_grasps(pts)
+            all_confs               = confs.clone() # keep the pointwise confs for plotting later
 
         # Filter the grasps by thresholding and (optionally) furthest-point sampling.
         with TimeIt('Filter Grasps'):
-            grasps, confs   = filter_grasps(grasps, confs)
+            grasps, confs, widths   = filter_grasps(grasps, confs, widths)
 
         if grasps is None: return
 
@@ -464,7 +487,7 @@ def find_grasps():
 
         with TimeIt('Transform to eq pose'):
             grasps = transform_to_eq_pose(grasps)
-        
+
         with TimeIt('Publish Grasps'):
         
             # convert homogeneous poses to ros message poses
@@ -482,6 +505,7 @@ def find_grasps():
             grasps_msg = Grasps()
             grasps_msg.poses = [q_v_to_pose(q, v) for q, v in zip(qs, vs)]
             grasps_msg.confs = confs.tolist()
+            grasps_msg.widths = widths.tolist()
             grasps_msg.header = copy.copy(header)
             grasp_pub.publish(grasps_msg)
 
@@ -507,31 +531,19 @@ def find_grasps():
 # https://robotics.stackexchange.com/questions/20069/are-rospy-subscriber-callbacks-executed-sequentially-for-a-single-topic
 # https://nu-msr.github.io/me495_site/lecture08_threads.html
 def depth_callback(depth_msg):
-    global queue, queue_mtx, ee_pose_msg
-    # print(f'Message received: {depth_msg.header.stamp}')
-    # with TimeIt('Queueing'):
+    global queue, queue_mtx
 
-    ee_tf = torch.eye(4)
-    ee_orn = ee_pose_msg.pose.orientation
-    ee_orn = torch.Tensor([ee_orn.x, ee_orn.y, ee_orn.z, ee_orn.w])
-    ee_orn = quaternion_to_rotation_matrix(ee_orn, order=QuaternionCoeffOrder.XYZW)
-    ee_tf[:3, :3] = ee_orn
-
-    ee_pos = ee_pose_msg.pose.position
-    ee_pos = torch.Tensor([ee_pos.x, ee_pos.y, ee_pos.z])
-    ee_tf[:3, 3] = ee_pos 
+    cam_tf = tf_helper.get_transform(depth_msg.header.frame_id, "world")
+    cam_tf = torch.Tensor(ros_numpy.numpify(cam_tf.transform))
     
     with queue_mtx:
-        queue.append((depth_msg, ee_tf))
+        queue.append((depth_msg, cam_tf))
 
 # subscribe to throttled point cloud
-# depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
-depth_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, depth_callback, queue_size=1)
-ee_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, ee_pose_cb, queue_size=1)
+depth_sub = rospy.Subscriber('/point_cloud', PointCloud2, depth_callback, queue_size=1)
 
 r = rospy.Rate(5)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
-
     r.sleep()

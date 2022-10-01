@@ -1,0 +1,66 @@
+<!-- A top-level launch file to start closed loop grasping on the Bravo arm -->
+<!-- Prior to launching, set enviroment variables with `source $(rospack find cl_tsgrasp)/config/machine_setup.bash` -->
+<launch>
+
+    <arg name="simulated"
+        default="false"
+        doc="Whether to start in Gazebo or in real life." />
+
+    <include file="$(find bravo_arm_sw)/launch/bravo_arm.launch">
+        <arg name="simulated" value="$(arg simulated)" />
+        <arg name="use_controller" value="true" />
+        <arg name="with_camera" value="false"/>
+        <arg name="with_force_torque_sensor" value="true"/>
+        <arg name="with_trisect" value="true"/>
+        <arg name="start_rviz" value="false"/>
+    </include>
+
+    <!-- Forward the point cloud topic onto /point_cloud -->
+    <node pkg="topic_tools" type="relay" name="point_cloud_relayer"
+        args="passthrough/output /point_cloud"
+    />
+
+    <!-- Remap point cloud -->
+    <remap from="camera/depth/points" to="point_cloud" />
+    
+    <!-- Start rviz for visualization -->
+    <node  pkg="rviz" type="rviz" output="screen" name="rviz" 
+    args="-d $(find cl_tsgrasp)/config/testbed.rviz"/>
+
+    <!-- Grasp network node -->
+    <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
+     output="screen" respawn="true" launch-prefix="xterm -hold -e taskset -c 3 $(env NN_CONDA_PATH)">
+        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
+    </node>
+
+    <!-- Kinematic feasibility filter -->
+    <!-- The IKFast plugin tends to get greedy and take up 8 CPU cores. It does fine with only one.
+    The `taskset` command limits the cores it can access at the OS level (a hack). -->
+    <rosparam ns="bravo" file="$(find cl_tsgrasp)/config/kin_feas_filter.yaml" command="load" />
+    <node ns="bravo" pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" 
+        respawn="true" output="screen" launch-prefix="xterm -hold -e taskset -c 1">
+        <remap from="tsgrasp/grasps" to="/tsgrasp/grasps_unfiltered" />
+        <remap from="tsgrasp/grasps_filtered" to="/tsgrasp/grasps" />
+        <remap from="planning_scene_world" to="move_group/planning_scene_world"/>
+        <remap from="planning_scene" to="move_group/monitored_planning_scene"/>
+        <remap from="collision_object" to="move_group/collision_object"/>
+        <remap from="attached_collision_object" to="move_group/attached_collision_object"/>
+    </node>
+
+    <!-- Node to publish grasp poses for visualization -->
+    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers" launch-prefix="xterm -hold -e" args='--color "confs"' >
+        <remap from="grasps" to="tsgrasp/grasps" />
+        <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers" />
+    </node>
+
+    <!-- show invalid grasps in red -->
+    <!-- "(255.0, 0.0, 0.0, 0.05) -->
+    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers_unfiltered" launch-prefix="xterm -hold -e" args='--color "(255.0, 0.0, 0.0, 0.2)"' >
+        <remap from="grasps" to="tsgrasp/grasps_unfiltered" />
+        <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers_unfiltered" />
+    </node>
+    
+    <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e" respawn="true"/>
+
+</launch>
+
