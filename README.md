@@ -1,6 +1,8 @@
 # cl_tsgrasp
 
-This is a demo of grasping using tsgrasp.
+This is a ROS package to synthesize and execute grasps on the RSA Testbed using tsgrasp and MoveIt.
+
+[![Demo Video](https://img.youtube.com/vi/JBEWkCMrQKs/0.jpg)](https://www.youtube.com/watch?v=JBEWkCMrQKs)
 
 # Installation
 
