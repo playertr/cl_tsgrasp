@@ -31,8 +31,12 @@ def poses_cb(msg):
 
     total_markers = 1000
     skip = int(len(msg.poses) / total_markers)
-    poses = msg.poses[::skip]
-    confs = msg.confs[::skip]
+    if skip > 0:
+        poses = msg.poses[::skip]
+        confs = msg.confs[::skip]
+    else:
+        poses = msg.poses
+        confs = msg.confs
 
     if len(confs) == 0: return
     

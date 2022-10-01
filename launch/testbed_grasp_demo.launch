@@ -15,22 +15,17 @@
         <arg name="start_rviz" value="false"/>
     </include>
 
+    <!-- Forward the point cloud topic onto /point_cloud -->
     <node pkg="topic_tools" type="relay" name="point_cloud_relayer"
-        args="passthrough/output point_cloud"
+        args="passthrough/output /point_cloud"
     />
 
     <!-- Remap point cloud -->
     <remap from="camera/depth/points" to="point_cloud" />
     
-<!-- temporary: include Realsense -->
-    <!-- <include file="$(find hacky_utils)/launch/realsense_start.launch"/>
-
-    <node pkg="tf2_ros" type="static_transform_publisher" name="camera_link_broadcaster"
-        args="0.154 0.055 0.025 0 0 0 1 left camera_depth_optical_frame" /> -->
-
     <!-- Start rviz for visualization -->
     <node  pkg="rviz" type="rviz" output="screen" name="rviz" 
-    args="-d $(find cl_tsgrasp)/config/bravo.rviz"/>
+    args="-d $(find cl_tsgrasp)/config/testbed.rviz"/>
 
     <!-- Grasp network node -->
     <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
@@ -52,22 +47,6 @@
         <remap from="attached_collision_object" to="move_group/attached_collision_object"/>
     </node>
 
-    <!-- Node to select goal pose -->
-    <!-- <node pkg="cl_tsgrasp" type="choose_grasps.py" name="choose_grasps" output="screen" respawn="true" launch-prefix="xterm -hold -e "/> -->
-
-    <!-- Node to publish orbital pose -->
-    <!-- <node pkg="cl_tsgrasp" type="publish_orbital_pose.py" name="publish_orbital_pose" launch-prefix="xterm -hold -e " /> -->
-
-    <!-- Node to publish end effector pose -->
-    <!-- <node pkg="cl_tsgrasp" type="publish_ee_pose.py" respawn="true" name="publish_ee_pose"  output="screen" launch-prefix="xterm -hold -e " /> -->
-
-    <!-- Node to publish camera pose -->
-    <node pkg="cl_tsgrasp" type="publish_cam_pose.py" respawn="true" name="publish_cam_pose" output="screen" launch-prefix="xterm -hold -e " />
-
-    <!-- Node to transform PoseStamped[] into PoseArray for rviz visualization -->
-    <node pkg="topic_tools" type="transform" name="pose_translater"
-        args="/tsgrasp/grasps /tsgrasp/grasps_pose geometry_msgs/PoseArray 'geometry_msgs.msg.PoseArray(header=m.header, poses=m.poses)' --import geometry_msgs --wait-for-start"/>
-    
     <!-- Node to publish grasp poses for visualization -->
     <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="grasp_markers" launch-prefix="xterm -hold -e" args='--color "confs"' >
         <remap from="grasps" to="tsgrasp/grasps" />
@@ -80,29 +59,8 @@
         <remap from="grasps" to="tsgrasp/grasps_unfiltered" />
         <remap from="grasp_pose_markers" to="tsgrasp/grasp_pose_markers_unfiltered" />
     </node>
-
-    <node pkg="cl_tsgrasp" type="grasp_pose_to_marker_array.py" name="orbital_markers" launch-prefix="xterm -hold -e" args='--color "(255.0, 255.0, 0.0, 0.2)"' >
-        <remap from="grasps" to="bravo/orbital_grasps" />
-        <remap from="grasp_pose_markers" to="tsgrasp/orbital_grasp_markers" />
-    </node>
     
     <node ns="bravo" pkg="cl_tsgrasp" type="gui_fsm.py" name="gui_fsm" output="screen" launch-prefix="xterm -hold -e" respawn="true"/>
-    <!-- launch-prefix="gnome-terminal command"/> -->
-
-    <!-- <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure"/> -->
-
-    <!-- Graphical slider to control joint positions for testing -->
-    <!-- <node pkg="rqt_joint_trajectory_controller" type="rqt_joint_trajectory_controller" name="rqt_joint_trajectory_controller" ns="bravo"/>
-
-    <node pkg="rqt_plot" type="rqt_plot" name="plotter" args="/bravo/joint_states/position[1]"/> -->
-
-    <!-- <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="log">
-        <param name="pixel_format" value="yuyv"/>
-        <param name="video_device" value="/dev/video10"/>
-        <param name="image_width" value="1280"/>
-        <param name="image_height" value="720"/>
-        <param name="framerate" value="30"/>
-    </node> -->
 
 </launch>
 

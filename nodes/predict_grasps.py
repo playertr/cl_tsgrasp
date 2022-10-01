@@ -5,6 +5,7 @@ try:
     pkg_root = Path(__file__).parent.parent.resolve()
     sys.path.insert(0, str(pkg_root))
     from nn.load_model import load_model
+    from nodes.utils import TFHelper, TimeIt
 
     # ROS dependencies
     import rospy
@@ -28,9 +29,10 @@ try:
     from pytorch3d.ops import sample_farthest_points, knn_points
     from typing import List
     # torch.backends.cudnn.benchmark=True # makes a big difference on FPS for some PTS_PER_FRAME values, but seems to increase memory usage and can result in OOM errors.
+
 except ImportError as e:
     print(e)
-    print("roslaunch must invoke this script using the NN_CONDA_PATH specified in config/machine_setup.bash:")
+    print("roslaunch must invoke this script using the NN_CONDA_PATH environment variable.")
     print("\t\t")
 
 ## global constants
@@ -38,8 +40,7 @@ QUEUE_LEN       = 4
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
 CONF_THRESHOLD  = 0.0
-TOP_K           = 45000 #1000
-# WORLD_BOUNDS    = torch.Tensor([[-2, -2, -1], [2, 2, 1]]) # (xyz_lower, xyz_upper)
+TOP_K           = 45000
 WORLD_BOUNDS    = torch.Tensor([[-2, -2, 0.05], [2, 2, 2]]) # (xyz_lower, xyz_upper)
 CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.22], [0.8, 0.8, 0.4]]) # (xyz_lower, xyz_upper)
 OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
@@ -63,29 +64,7 @@ queue = deque(maxlen=QUEUE_LEN) # FIFO queue, right side is most recent
 queue_mtx = Lock()
 latest_header = Header()
 
-cam_pose_msg = None
-
-def cam_pose_cb(msg):
-    global cam_pose_msg
-    cam_pose_msg = msg
-
-import time
-class TimeIt:
-    def __init__(self, s):
-        self.s = s
-        self.t0 = None
-        self.t1 = None
-        self.print_output = True
-
-    def __enter__(self):
-        self.t0 = time.time()
-
-    def __exit__(self, t, value, traceback):
-        torch.cuda.synchronize()
-        self.t1 = time.time()
-        if self.print_output:
-            print('%s: %s' % (self.s, self.t1 - self.t0))
-
+tf_helper = TFHelper()
 
 # https://stackoverflow.com/questions/59387182/construct-a-rotation-matrix-in-pytorch
 #@torch.jit.script
@@ -308,8 +287,7 @@ def bound_point_cloud_world(pts, poses):
 def downsample_xyz(pts: List[torch.Tensor], pts_per_frame: int) -> List[torch.Tensor]:
     ## downsample point clouds proportion of points -- will that result in same sampling distribution?
     for i in range(len(pts)):
-        # pts_to_keep = int(pts_per_frame / 90_000 * len(pts[i]))
-        pts_to_keep= pts_per_frame
+        pts_to_keep = int(pts_per_frame / 90_000 * len(pts[i]))
         idxs = torch.randperm(
             len(pts[i]), dtype=torch.int32, device=pts[i].device
         )[:pts_to_keep].sort()[0].long()
@@ -368,14 +346,14 @@ def filter_grasps(grasps, confs, widths):
         return None, None, None
 
     # furthest point sampling
-    # # furthest point sampling by position
+    # furthest point sampling by position
     pos = grasps[:,:3,3]
     _, selected_idcs = sample_farthest_points(pos.unsqueeze(0), K=TOP_K)
     selected_idcs = selected_idcs.squeeze()
 
-    # grasps = grasps[selected_idcs]
-    # confs = confs[selected_idcs]
-    # widths = widths[selected_idcs]
+    grasps = grasps[selected_idcs]
+    confs = confs[selected_idcs]
+    widths = widths[selected_idcs]
 
     return grasps, confs, widths
 
@@ -470,14 +448,14 @@ def find_grasps():
         # Start with pts, a list of Torch point clouds.
 
         # Remove points that are outside of the boundaries in the camera frame.
-        # with TimeIt('Bound Point Cloud'):
-        #     pts             = bound_point_cloud_cam(pts, poses)
-        #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
+        with TimeIt('Bound Point Cloud'):
+            pts             = bound_point_cloud_cam(pts, poses)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # # Remove points that are outside of the boundaries in the global frame.
-        # with TimeIt('Bound Point Cloud'):
-        #     pts             = bound_point_cloud_world(pts, poses)
-        #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
+        with TimeIt('Bound Point Cloud'):
+            pts             = bound_point_cloud_world(pts, poses)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Downsample the points with uniform probability.
         with TimeIt('Downsample Points'):
@@ -553,27 +531,16 @@ def find_grasps():
 # https://robotics.stackexchange.com/questions/20069/are-rospy-subscriber-callbacks-executed-sequentially-for-a-single-topic
 # https://nu-msr.github.io/me495_site/lecture08_threads.html
 def depth_callback(depth_msg):
-    global queue, queue_mtx, cam_pose_msg
-    # print(f'Message received: {depth_msg.header.stamp}')
-    # with TimeIt('Queueing'):
+    global queue, queue_mtx
 
-    cam_tf = torch.eye(4)
-    cam_orn = cam_pose_msg.pose.orientation
-    cam_orn = torch.Tensor([cam_orn.x, cam_orn.y, cam_orn.z, cam_orn.w])
-    cam_orn = quaternion_to_rotation_matrix(cam_orn, order=QuaternionCoeffOrder.XYZW)
-    cam_tf[:3, :3] = cam_orn
-
-    cam_pos = cam_pose_msg.pose.position
-    cam_pos = torch.Tensor([cam_pos.x, cam_pos.y, cam_pos.z])
-    cam_tf[:3, 3] = cam_pos 
+    cam_tf = tf_helper.get_transform(depth_msg.header.frame_id, "world")
+    cam_tf = torch.Tensor(ros_numpy.numpify(cam_tf.transform))
     
     with queue_mtx:
         queue.append((depth_msg, cam_tf))
 
 # subscribe to throttled point cloud
-# depth_sub = rospy.Subscriber('/tsgrasp/points', PointCloud2, depth_callback, queue_size=1)
-depth_sub = rospy.Subscriber('/camera/depth/color/points', PointCloud2, depth_callback, queue_size=1)
-cam_pose = rospy.Subscriber('/tsgrasp/cam_pose', PoseStamped, cam_pose_cb, queue_size=1)
+depth_sub = rospy.Subscriber('/point_cloud', PointCloud2, depth_callback, queue_size=1)
 
 r = rospy.Rate(5)
 while not rospy.is_shutdown():

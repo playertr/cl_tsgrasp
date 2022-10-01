@@ -4,14 +4,12 @@ import moveit_commander
 import sys
 import time
 
-from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3, Pose
-from tf.transformations import euler_from_quaternion
+from geometry_msgs.msg import PoseStamped
 import numpy as np
 
 import rospy
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-from utils import se3_dist, TFHelper
-import copy
+from utils import TFHelper
 
 class Mover:
     """Wrapper around MoveIt functionality for the arm."""
@@ -41,14 +39,6 @@ class Mover:
         self.tfh = TFHelper()
 
         self.grasp_chooser = GraspChooser(self.tfh)
-
-        self.servo_helper = ServoHelper(
-            twist_cmd_topic="/bravo/servo_server/delta_twist_cmds",
-            ee_frame_id="ee_link",
-            tfh = self.tfh,
-            grasp_chooser = self.grasp_chooser
-        )
-
 
     def add_ground_plane_to_planning_scene(self):
         """Add a box object to the PlanningScene to prevent paths that collide
@@ -210,164 +200,7 @@ class Mover:
 
         return success
 
-    def execute_grasp_closed_loop(self, orbital_pose: PoseStamped, final_pose: PoseStamped) -> bool:
-        """Execute an open loop grasp by planning and executing a sequence of motions in turn:
-           1) Open the jaws
-           2) Move the end effector the the orbital pose
-           3) Servo the end effector to the (possibly changing) final pose
-           4) Close the jaws
-           5) Move the end effector to the orbital pose
-           6) Move the arm to the 'rest' configuration
-
-        Args:
-            orbital_pose (PoseStamped): the pre-grasp orbital pose of the end effector
-            final_pose (PoseStamped): the end effector pose in which to close the jaws
-
-        Returns:
-            bool: whether every step succeeded according to MoveIt
-        """
-
-        print("Executing grasp.")
-
-        print("\tOpening jaws.")
-        success = self.go_gripper(np.array([0.02]), wait=True)
-        if not success: return False
-
-        print("\tMoving end effector to orbital pose.")
-        success = self.go_ee_pose(orbital_pose, wait=True)
-        if not success: return False
-
-        print("\tMoving end effector to final pose.")
-        success = self.servo_helper.servo_to_goal_pose(final_pose)
-        if not success: return False
-
-        print("\tClosing jaws.")
-        success = self.go_gripper(np.array([0.0]), wait=True)
-        if not success: return False
-
-        print("\tMoving end effector to orbital pose.")
-        success = self.go_ee_pose(orbital_pose, wait=True)
-        if not success: return False
-
-        print("\tMoving arm to 'rest' configuration.")
-        success = self.go_named_group_state('rest', wait=True)
-        return success
-
-    def servo_to_goal_pose(self, final_goal_pose):
-        return self.servo_helper.servo_to_goal_pose(final_goal_pose)
-
-class ExpoFilter:
-    """Scalar exponential FIR filter."""
-
-    def __init__(self, tau: float = 0):
-        self.tau = tau
-        self.x = None
-
-    def update(self, x: float) -> float:
-
-        if self.x == None:
-            self.x = x
-        else:
-            self.x = self.tau * self.x + (1 - self.tau) * x
-
-        return self.x
-
-from scipy.spatial.transform import Slerp
-from scipy.spatial.transform import Rotation as R
-class PoseStampedExpoFilter:
-    """Exponential filter on a PoseStamped that applies an expo filter to each
-    scalar term individually.
-    
-    Rotation uses spherical linear interpolation."""
-    
-    def __init__(self, tau=[0.9, 0.9, 0.9, 0.99]):
-        self.x_filter = ExpoFilter()
-        self.y_filter = ExpoFilter()
-        self.z_filter = ExpoFilter()
-        self.orientation = R.identity()
-        self.set_tau(tau)
-
-    def set_tau(self, tau):
-        self.x_filter.tau = tau[0]
-        self.y_filter.tau = tau[1]
-        self.z_filter.tau = tau[2]
-        self.orientation_tau = tau[3]
-
-    def update(self, posestamped: PoseStamped) -> PoseStamped:
-
-        x = self.x_filter.update(posestamped.pose.position.x)
-        y = self.y_filter.update(posestamped.pose.position.y)
-        z = self.z_filter.update(posestamped.pose.position.z)
-
-        # lowpass filter using spherical linear interpolation
-        orn = posestamped.pose.orientation
-        orn = R.from_quat([orn.x, orn.y, orn.z, orn.w])
-        self.orientation = Slerp(
-            times=[0, 1],
-            rotations=R.from_quat([self.orientation.as_quat(), orn.as_quat()]) # gross
-        )(1 - self.orientation_tau)
-
-        ps = copy.deepcopy(posestamped)
-        ps.pose.position.x = x
-        ps.pose.position.y = y
-        ps.pose.position.z = z
-        ps.pose.orientation.x = self.orientation.as_quat()[0]
-        ps.pose.orientation.y = self.orientation.as_quat()[1]
-        ps.pose.orientation.z = self.orientation.as_quat()[2]
-        ps.pose.orientation.w = self.orientation.as_quat()[3]
-        return ps
-
-class ClosestBestFilter:
-    """A lowpass filter for the terminal grasp pose.
-    On update, this filter picks the BEST grasp that is CLOSEST to the previous selection. This is achieved by selecting the arg max over
-    ```math
-    scores[i] = grasp_closeness_importance * np.exp(-dists[i]/self.scale) + (1 - grasp_closeness_importance) * confs[i]
-    ```
-    """
-    scale         = 0.01 # type: float
-
-    best_grasp    = None # type: Pose
-    def __init__(self, grasps, confs):
-        self.reset(grasps, confs)
-
-    def reset(self, grasps, confs):
-        best_grasp_idx = np.argmax(confs)
-        self.best_grasp = grasps[best_grasp_idx]
-
-    def update(self, grasps, confs, grasp_closeness_importance):
-
-        if len(confs) == 0: return
-        dists = np.array([dist(grasp, self.best_grasp) for grasp in grasps])
-        scores = grasp_closeness_importance * np.exp(-dists/self.scale) +  np.array(confs) * (1 - grasp_closeness_importance)
-        i = np.argmax(scores)
-        self.best_grasp = grasps[i]
-
-def pose_to_homo(pose):
-    tf = quaternion_matrix(np.array([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]))
-    tf[:3,3] = pose.position.x, pose.position.y, pose.position.z
-    return tf
-
-"""The (5,3) matrix of control points for a single gripper.
-    Note: these may be in the wrong frame.
-"""
-cps = np.array([
-    [ 0.0000000e+00,  0.0000000e+00,  0.0000000e+00],
-    [ 5.2687433e-02, -5.9955313e-05,  7.5273141e-02],
-    [-5.2687433e-02,  5.9955313e-05,  7.5273141e-02],
-    [ 5.2687433e-02, -5.9955313e-05,  1.0527314e-01],
-    [-5.2687433e-02,  5.9955313e-05,  1.0527314e-01]])
-cps = np.hstack([cps, np.ones((len(cps), 1))]) # make homogeneous
-
-def dist(p1, p2):
-    """Compare two poses by control point distance."""
-    mat1 = pose_to_homo(p1)
-    mat2 = pose_to_homo(p2)
-    return np.mean(
-        (mat1.dot(cps.T) - mat2.dot(cps.T))**2
-    )
-
 from cl_tsgrasp.msg import Grasps
-from tf.transformations import quaternion_matrix
 class GraspChooser:
 
     final_goal_pose = None
@@ -385,9 +218,6 @@ class GraspChooser:
 
         self.orbital_best_grasp_pub = rospy.Publisher(name='/tsgrasp/orbital_final_goal_pose', 
             data_class=PoseStamped, queue_size=1)
-
-        # self.best_closest_grasp_pub = rospy.Publisher(name='/tsgrasp/best_closest_grasp', 
-        #     data_class=PoseStamped, queue_size=1)
 
         self.closest_grasp_lpf = None
         self.best_closest_grasp = None
@@ -417,18 +247,6 @@ class GraspChooser:
         self.orbital_best_grasp_pub.publish(orbital_best_grasp)
         self.orbital_best_grasp = orbital_best_grasp
 
-        # Find best, closest grasp
-        # if self.closest_grasp_lpf is None:
-        #     self.closest_grasp_lpf = ClosestBestFilter(poses, confs)
-        # else:
-        #     self.closest_grasp_lpf.update(poses, confs, self.grasp_closeness_importance)
-        
-        # best_closest_grasp = PoseStamped()
-        # best_closest_grasp.pose = self.closest_grasp_lpf.best_grasp
-        # best_closest_grasp.header = msg.header
-        # self.best_closest_grasp_pub.publish(best_closest_grasp)
-        # self.best_closest_grasp = best_closest_grasp
-
     def reset_closest_target(self, posestamped: PoseStamped):
         if posestamped.header.frame_id != self.best_closest_grasp.header.frame_id: raise ValueError
         self.closest_grasp_lpf.best_grasp = posestamped.pose
@@ -438,128 +256,3 @@ class GraspChooser:
     
     def get_best_closest_grasp(self):
         return self.best_closest_grasp
-
-class EndEffectorPID:
-    """Controller to issue a Twist driving the end effector to a desired pose. """
-
-    # Only proportional control implemented so far
-    LAMBDA = 2.0*np.array([1, 1, 1, 1, 1, 1])
-
-    def compute_twist(self, target_pose: PoseStamped) -> TwistStamped:
-        """Generate visual servoing Twist command using proportional control over X,Y,Z,R,P,Y .
-
-        Args:
-            target_pose (PoseStamped): the pose of the target in the frame of the end effector
-
-        Returns:
-            TwistStamped: the twist to issue to MoveIt servo
-        """
-        
-        err = self._posestamped_to_arr(target_pose.pose)
-        efforts = self.LAMBDA * (err)
-
-        twist = TwistStamped()
-        twist.header = target_pose.header
-        twist.header.stamp = rospy.Time.now() # make current so servo command doesn't time out
-        twist.twist.linear = Vector3(*efforts[:3])
-        twist.twist.angular = Vector3(*efforts[3:])
-
-        return twist
-
-    @staticmethod
-    def _posestamped_to_arr(ps):
-        pos, quat = ps.position, ps.orientation
-        rpy = euler_from_quaternion(
-            [quat.x, quat.y, quat.z, quat.w]
-        )
-        return np.array([pos.x, pos.y, pos.z, *rpy])
-
-from publish_orbital_pose import orbital_pose
-class ServoHelper:
-    """Helper class to handle pose-based visual servoing loop."""
-
-    GOAL_PUB_RATE   = 60
-    SUCCESS_RADIUS  = 0.03 # in SE(3) space -- dimensionless
-    TIMEOUT         = 60
-    PECK_SPEED      = 0.005 # m/s speed that gripper pecks forward
-
-    _goal_pose = None
-    tfh: TFHelper
-    ee_frame_id: str
-
-    def __init__(self, twist_cmd_topic, ee_frame_id, tfh, grasp_chooser: GraspChooser):
-        
-        self._servo_twist_pub = rospy.Publisher(
-            name=twist_cmd_topic,
-            data_class=TwistStamped, queue_size=1)
-        self.ee_frame_id = ee_frame_id
-        self.tfh = tfh
-
-        self.end_effector_pid = EndEffectorPID()
-        self.grasp_chooser = grasp_chooser
-
-        self.filtered_pose_sub = rospy.Publisher("/tsgrasp/servoing_pose", PoseStamped, queue_size=1)
-
-    def servo_to_goal_pose(self, final_pose):
-
-        start_time = rospy.Time.now()
-
-        origin = PoseStamped()
-        origin.header.frame_id = self.ee_frame_id
-        origin.pose.orientation.w = 1
-
-        grasp_pose_filter = PoseStampedExpoFilter()
-
-        orbital_distance = 0.05
-
-        self.grasp_chooser.reset_closest_target(final_pose)
-
-        # update goal pose at fixed rate
-        in_grasp_pose = False
-        rate = rospy.Rate(self.GOAL_PUB_RATE)
-        while rospy.Time.now() - start_time < rospy.Duration(self.TIMEOUT):
-
-            self.grasp_chooser.grasp_closeness_importance = 1.0
-
-            # Apply a low-pass filter to the best grasp in the world frame.
-            best_closest_grasp_world = self.tfh.transform_pose(
-                self.grasp_chooser.get_best_closest_grasp(),
-                "world"
-            )
-
-            # Lock the lowpass filter output when within 5 cm
-            if orbital_distance < 0.05:
-                grasp_pose_filter.set_tau([1]*6)
-
-            filtered_grasp = grasp_pose_filter.update(best_closest_grasp_world)
-            target_pose = orbital_pose(filtered_grasp, orbit_radius=orbital_distance)
-
-            # Transform the target pose into the end-effector frame for servoing.
-            target_pose = self.tfh.transform_pose(
-                target_pose,
-                self.ee_frame_id
-            )
-
-            self.filtered_pose_sub.publish(target_pose)
-
-            dist = se3_dist(origin.pose, target_pose.pose)
-            if  orbital_distance == 0 and dist < self.SUCCESS_RADIUS:
-                in_grasp_pose = True
-                break
-
-            self._servo_twist_pub.publish(
-                self.end_effector_pid.compute_twist(target_pose)
-            )
-            
-            orbital_distance = max(orbital_distance - self.PECK_SPEED / self.GOAL_PUB_RATE, 0)
-
-            rate.sleep()
-
-        # send a zero twist to help moveit_servo finish
-        zero_twist = TwistStamped()
-        zero_twist.header.frame_id = self.ee_frame_id
-        self._servo_twist_pub.publish(zero_twist)
-
-        print("servoing succeeded" if in_grasp_pose else "servoing failed")
-
-        return in_grasp_pose

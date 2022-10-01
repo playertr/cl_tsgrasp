@@ -1,6 +1,0 @@
-<launch>
-    <node pkg="cl_tsgrasp" type="kin_feas_filter" name="kin_feas_filter" respawn="true" output="screen">
-        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
-        <remap from="tsgrasp/grasps_filtered" to="tsgrasp/grasps" />
-    </node>
-</launch>
