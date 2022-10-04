@@ -52,7 +52,7 @@ def poses_cb(msg):
     for i, pose in enumerate(poses):
         marker = gripper_marker()
         marker.id = i
-        marker.lifetime = rospy.Duration()
+        marker.lifetime = rospy.Duration(0.5)
 
         if color == 'confs':
             marker.color.a = 0.5
