@@ -1,0 +1,20 @@
+name: tsgrasp
+channels:
+  - pytorch
+  - robostack
+  - pytorch3d
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - ros-noetic-rospy
+  - ros-noetic-tf2-ros
+  - ros-noetic-sensor-msgs
+  - ros-noetic-ros-numpy
+  - pytorch
+  - anaconda::openblas-devel
+  - kornia
+  - pytorch3d
+  - pip=21.2.4
+  - setuptools=58.0.4
+  - packaging==21.0
