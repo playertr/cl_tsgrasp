@@ -542,7 +542,7 @@ def depth_callback(depth_msg):
 # subscribe to throttled point cloud
 depth_sub = rospy.Subscriber('/point_cloud', PointCloud2, depth_callback, queue_size=1)
 
-r = rospy.Rate(5)
+r = rospy.Rate(30)
 while not rospy.is_shutdown():
     print("##########################################################")
     find_grasps()
