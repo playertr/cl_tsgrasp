@@ -13,18 +13,18 @@ import torch
 cfg_str = """
 training:
   gpus: 1
-  batch_size: 48
-  max_epochs: 100
+  batch_size: 12
+  max_epochs: 200
   optimizer:
     learning_rate: 0.00025
     lr_decay: 0.99
   animate_outputs: false
   make_sc_curve: false
-  use_wandb: false
+  use_wandb: true
   wandb:
     project: TSGrasp
     experiment: tsgrasp_scene
-    notes: First run attempting table scene data.
+    notes: Table scene data with random orbital yaw speed
 model:
   _target_: tsgrasp.net.lit_tsgraspnet.LitTSGraspNet
   model_cfg:
@@ -44,10 +44,10 @@ model:
 data:
   _target_: tsgrasp.data.lit_scenerenderer_dm.LitTrajectoryDataset
   data_cfg:
-    num_workers: 0
+    num_workers: 4
     data_proportion_per_epoch: 1
     dataroot: /scratch/playert/workdir/cgn_data
-    frames_per_traj: 1
+    frames_per_traj: 4
     points_per_frame: 45000
     min_pitch: 0.0
     max_pitch: 1.222
@@ -62,7 +62,7 @@ data:
       gaussian_kernel: 0
       sigma: 0.001
 
-ckpt_path: tsgrasp_scene_1_frame/model.ckpt
+ckpt_path: tsgrasp_scene_4_random_yaw/model.ckpt
 """
 
 def load_model():
