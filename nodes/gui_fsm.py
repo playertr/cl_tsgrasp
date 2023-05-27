@@ -23,7 +23,7 @@ from states import  (
 )
 
 go_to_rest = GoToRest(mover)
-spawn_new_item = SpawnNewItem()
+# spawn_new_item = SpawnNewItem()
 open_jaws = OpenJaws(mover)
 close_jaws = CloseJaws(mover)
 execute_ol_grasp = ExecuteGraspOpenLoop(mover)
@@ -32,7 +32,7 @@ sg.theme('DarkAmber')   # Add a touch of color
 
 # All the stuff inside your window.
 layout = [  [sg.Button('go_to_rest')],
-            [sg.Button('spawn_new_item')],
+            # [sg.Button('spawn_new_item')],
             [sg.Button('open_jaws')],
             [sg.Button('close_jaws')],
             [sg.Button('grasp_open_loop')],
