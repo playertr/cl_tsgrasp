@@ -9,9 +9,9 @@
     <include file="$(find bravo_arm_sw)/launch/bravo_arm.launch">
         <arg name="simulated" value="$(arg simulated)" />
         <arg name="use_controller" value="true" />
-        <arg name="with_camera" value="false"/>
-        <arg name="with_force_torque_sensor" value="true"/>
-        <arg name="with_trisect" value="true"/>
+        <!-- <arg name="with_camera" value="false"/> -->
+        <!-- <arg name="with_force_torque_sensor" value="true"/> -->
+        <!-- <arg name="with_trisect" value="true"/> -->
         <arg name="start_rviz" value="false"/>
     </include>
 
