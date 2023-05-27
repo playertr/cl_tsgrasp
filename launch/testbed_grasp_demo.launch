@@ -28,10 +28,21 @@
     args="-d $(find cl_tsgrasp)/config/testbed.rviz"/>
 
     <!-- Grasp network node -->
-    <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
-     output="screen" respawn="true" launch-prefix="xterm -hold -e taskset -c 3 $(env NN_CONDA_PATH)">
-        <remap from="tsgrasp/grasps" to="tsgrasp/grasps_unfiltered" />
-    </node>
+    <!-- Note: you can't remap arguments from this launch file because rosargs
+    are not passed to the Docker script. You can, however, modify the topic
+    names directly in predict_grasps.py, which is bind-mounted into the
+    container at runtime. ROS_MASTER_URI must be localhost:11311.
+    predict_grasps.py expects:
+    Inputs:
+        - /point_cloud : a PointCloud2  with a frame that is connected via tf2 to 
+            the 'world' frame. Only XYZ coords are used.
+        - /tf: tf2 updates
+    Outputs:
+        - /tsgrasp/grasps_unfiltered : Grasps message with selected grasp poses
+        - /tsgrasp/confs3d : PointCloud2 whose alpha channel is grasp confidence
+    -->
+    <node pkg="cl_tsgrasp" type="predict_grasps_docker.sh" name="predict_grasps" 
+     output="screen" respawn="true" launch-prefix="xterm -hold -e" />
 
     <!-- Kinematic feasibility filter -->
     <!-- The IKFast plugin tends to get greedy and take up 8 CPU cores. It does fine with only one.
