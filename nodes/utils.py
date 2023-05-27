@@ -39,9 +39,11 @@ class TimeIt:
         self.print_output = True
 
     def __enter__(self):
+        import torch; torch.cuda.synchronize()
         self.t0 = time.time()
 
     def __exit__(self, t, value, traceback):
         self.t1 = time.time()
+        import torch; torch.cuda.synchronize()
         if self.print_output:
             print('%s: %s' % (self.s, self.t1 - self.t0))
