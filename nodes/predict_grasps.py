@@ -513,7 +513,7 @@ def find_grasps():
             #  https://gist.github.com/lucasw/ea04dcd65bc944daea07612314d114bb
             # (N x 4) array, with fourth item as alpha
             cloud_points = pts[-1]
-            downsample = 1
+            downsample = 4
             cloud_points = torch.cat([
                 cloud_points[::downsample], 
                 all_confs[::downsample]], 
