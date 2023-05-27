@@ -16,5 +16,6 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 docker run -it \
     --gpus all \
     --network host \
+    -v $SCRIPT_DIR/../nn/load_model.py:/cl_tsgrasp/cl_tsgrasp_ws/src/cl_tsgrasp/nn/load_model.py \
     -v $SCRIPT_DIR/../nodes/predict_grasps.py:/cl_tsgrasp/cl_tsgrasp_ws/src/cl_tsgrasp/nodes/predict_grasps.py \
     playertr/cl_tsgrasp
