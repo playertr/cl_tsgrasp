@@ -41,7 +41,7 @@ PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
 CONF_THRESHOLD  = 0.0
 TOP_K           = 45000
-# WORLD_BOUNDS    = torch.Tensor([[-2, -2, 0.02], [2, 2, 2]]) # (xyz_lower, xyz_upper)
+WORLD_BOUNDS    = torch.Tensor([[0, -0.4, 0.15], [2, -0.05, 2]]) # (xyz_lower, xyz_upper)
 # CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.2], [0.8, 0.8, 0.6]]) # (xyz_lower, xyz_upper)
 OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
 
@@ -453,9 +453,9 @@ def find_grasps():
         #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # # Remove points that are outside of the boundaries in the global frame.
-        # with TimeIt('Bound Point Cloud'):
-        #     pts             = bound_point_cloud_world(pts, poses)
-        #     if pts is None or any(len(pcl) == 0 for pcl in pts): return
+        with TimeIt('Bound Point Cloud Global'):
+            pts             = bound_point_cloud_world(pts, poses)
+            if pts is None or any(len(pcl) == 0 for pcl in pts): return
 
         # Downsample the points with uniform probability.
         with TimeIt('Downsample Points'):
