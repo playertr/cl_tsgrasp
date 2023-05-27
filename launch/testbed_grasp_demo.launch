@@ -17,6 +17,10 @@
 
     <!-- Forward the point cloud topic onto /point_cloud -->
     <node pkg="topic_tools" type="relay" name="point_cloud_relayer"
+        args="/zed_node/point_cloud/cloud_registered /point_cloud"
+    />
+
+    <node pkg="topic_tools" type="relay" name="point_cloud_relayer2"
         args="/scaled_points2 /point_cloud"
     />
 
