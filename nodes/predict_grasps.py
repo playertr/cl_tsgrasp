@@ -39,8 +39,8 @@ except ImportError as e:
 QUEUE_LEN       = 1
 PTS_PER_FRAME   = 45000
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
-CONF_THRESHOLD  = 0.0
-TOP_K           = 45000
+CONF_THRESHOLD  = 0
+TOP_K           = 500
 WORLD_BOUNDS    = torch.Tensor([[0, -0.4, 0.15], [2, -0.05, 2]]) # (xyz_lower, xyz_upper)
 # CAM_BOUNDS      = torch.Tensor([[-0.8, -0.8, 0.2], [0.8, 0.8, 0.6]]) # (xyz_lower, xyz_upper)
 OUTLIER_THRESHOLD = 1e-5 # smaller means more outliers will be eliminated
