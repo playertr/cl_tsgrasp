@@ -57,7 +57,7 @@ pl_model.eval()
 ## Start node
 rospy.init_node('grasp_detection')
 ## Output publishers
-grasp_pub = rospy.Publisher('tsgrasp/grasps', numpy_msg(Grasps), queue_size=10)
+grasp_pub = rospy.Publisher('tsgrasp/grasps_unfiltered', numpy_msg(Grasps), queue_size=10)
 pcl_pub = rospy.Publisher("/tsgrasp/confs3d", PointCloud2)
 
 queue = deque(maxlen=QUEUE_LEN) # FIFO queue, right side is most recent
