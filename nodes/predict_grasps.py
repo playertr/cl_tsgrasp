@@ -36,7 +36,7 @@ except ImportError as e:
     print("\t\t")
 
 ## global constants
-QUEUE_LEN       = 4
+QUEUE_LEN       = 1
 PTS_PER_FRAME   = 45000 #360 * 640 * 0.5 # 50% downsampling
 GRIPPER_DEPTH   = 0.12 # 0.1034 for panda
 CONF_THRESHOLD  = 0

@@ -62,4 +62,4 @@ ckpt_path: tsgrasp_scene_random_yaw_noise/model.ckpt
 """
 ```
 
-artifact playertr/TSGrasp/model-1w1vnp61:v3
+artifact playertr/TSGrasp/model-1w1vnp61:v99

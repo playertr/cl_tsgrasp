@@ -13,14 +13,14 @@ import torch
 cfg_str = """
 training:
   gpus: 1
-  batch_size: 12
-  max_epochs: 200
+  batch_size: 48
+  max_epochs: 100
   optimizer:
     learning_rate: 0.00025
     lr_decay: 0.99
   animate_outputs: false
   make_sc_curve: false
-  use_wandb: true
+  use_wandb: false
   wandb:
     project: TSGrasp
     experiment: tsgrasp_scene
@@ -44,25 +44,25 @@ model:
 data:
   _target_: tsgrasp.data.lit_scenerenderer_dm.LitTrajectoryDataset
   data_cfg:
-    num_workers: 4
+    num_workers: 0
     data_proportion_per_epoch: 1
     dataroot: /scratch/playert/workdir/cgn_data
-    frames_per_traj: 4
+    frames_per_traj: 1
     points_per_frame: 45000
     min_pitch: 0.0
     max_pitch: 1.222
     scene_contacts_path: ${data.data_cfg.dataroot}/scene_contacts
     pc_augm:
-      clip: 0.005
+      clip: 0.0025
       occlusion_dropout_rate: 0.0
       occlusion_nclusters: 0
-      sigma: 0.0
+      sigma: 0.0025
     depth_augm:
-      clip: 0.005
+      clip: 0.025
       gaussian_kernel: 0
-      sigma: 0.001
+      sigma: 0.025
 
-ckpt_path: tsgrasp_scene_4_random_yaw/model.ckpt
+ckpt_path: tsgrasp_scene_random_yaw_noise/model.ckpt
 """
 
 def load_model():
