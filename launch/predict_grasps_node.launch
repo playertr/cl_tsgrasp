@@ -1,8 +1,7 @@
 <launch>
 
     <!-- Grasp network node -->
-    <node pkg="cl_tsgrasp" type="predict_grasps.py" name="predict_grasps" 
-     output="screen" respawn="true" launch-prefix="$(env NN_CONDA_PATH)">
+    <node pkg="cl_tsgrasp" type="predict_grasps_docker.sh" name="predict_grasps" output="screen" respawn="true">
     </node>
 
 </launch>
