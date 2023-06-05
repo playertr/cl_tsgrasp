@@ -72,7 +72,7 @@ After inferring the grasp poses, confidences, and grasp widths using TSGrasp, th
 
 The recommended way to enable, disable, or change the parameters of any step in this pipeline is to modify `predict_grasps.py`. When you run the grasp synthesis node using `predict_grasps_docker.sh`, the modified file will be used by the container.
 
-# Conducting grasp trials
+# Conducting Grasp Trials
 To perform grasp trials on a Reach Robotics Bravo arm, use in `testbed_grasp_demo.launch`. This launch file requires [software dependencies](https://gitlab.com/apl-ocean-engineering/raven_manipulation/bravo_arm_sw) for the Bravo arm.
 
 If you want to do grasp trials on a different robot arm, many of the nodes (e.g., grasp prediction, motion planning, visualization, kinematic feasibility filtering...) can be modified to work with your MoveIt!-enabled robot. Refer to our reference implementation in `testbed_grasp_demo.launch` and happy hacking!
